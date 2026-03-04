@@ -1,3 +1,12 @@
+# Ansible discovery output (generated at runtime)
+output/
+
+# Ansible fact cache
+/tmp/ansible_fact_cache/
+
+# Ansible retry files
+*.retry
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
