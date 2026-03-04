@@ -1,0 +1,779 @@
+---
+# RHEL Server Discovery and Audit Playbook
+#
+# Gathers comprehensive facts from RHEL 6/7/8 servers for migration planning
+# to RHEL 9/10. All tasks are read-only — nothing is modified on target hosts.
+#
+# Usage:
+#   ansible-playbook gather_facts.yml
+#   ansible-playbook gather_facts.yml --limit rhel8
+#   ansible-playbook gather_facts.yml --tags selinux,network
+#
+# Output: ./output/discovery_report.yml
+
+- name: RHEL Server Discovery and Audit
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    output_dir: "./output"
+    rhel_major: "{{ ansible_distribution_major_version }}"
+
+  tasks:
+
+    # ==========================================================================
+    # SELinux
+    # ==========================================================================
+
+    - name: Get SELinux status
+      ansible.builtin.command: sestatus
+      register: disco_selinux_status
+      changed_when: false
+      failed_when: false
+      tags: [selinux]
+
+    - name: Get SELinux config file
+      ansible.builtin.slurp:
+        src: /etc/selinux/config
+      register: disco_selinux_config
+      failed_when: false
+      tags: [selinux]
+
+    # ==========================================================================
+    # Identity / Domain Join
+    # ==========================================================================
+
+    - name: Get SSSD config
+      ansible.builtin.slurp:
+        src: /etc/sssd/sssd.conf
+      register: disco_sssd_conf
+      failed_when: false
+      tags: [identity]
+
+    - name: Get realm list
+      ansible.builtin.command: realm list
+      register: disco_realm_list
+      changed_when: false
+      failed_when: false
+      tags: [identity]
+
+    - name: Get krb5.conf
+      ansible.builtin.slurp:
+        src: /etc/krb5.conf
+      register: disco_krb5_conf
+      failed_when: false
+      tags: [identity]
+
+    - name: Check if host is domain-joined (keytab exists)
+      ansible.builtin.stat:
+        path: /etc/krb5.keytab
+      register: disco_krb5_keytab
+      failed_when: false
+      tags: [identity]
+
+    - name: Get nsswitch.conf
+      ansible.builtin.slurp:
+        src: /etc/nsswitch.conf
+      register: disco_nsswitch_conf
+      failed_when: false
+      tags: [identity]
+
+    # ==========================================================================
+    # Security: sudoers, sshd, PAM
+    # ==========================================================================
+
+    - name: Get main sudoers file
+      ansible.builtin.slurp:
+        src: /etc/sudoers
+      register: disco_sudoers_main
+      failed_when: false
+      tags: [security]
+
+    - name: Find sudoers.d drop-in files
+      ansible.builtin.find:
+        paths: /etc/sudoers.d
+        file_type: file
+      register: disco_sudoers_d_files
+      failed_when: false
+      tags: [security]
+
+    - name: Read each sudoers.d file
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ disco_sudoers_d_files.files | default([]) }}"
+      register: disco_sudoers_d_contents
+      failed_when: false
+      tags: [security]
+
+    - name: Get sshd_config
+      ansible.builtin.slurp:
+        src: /etc/ssh/sshd_config
+      register: disco_sshd_config
+      failed_when: false
+      tags: [security]
+
+    - name: Find sshd_config.d drop-ins (RHEL 8+)
+      ansible.builtin.find:
+        paths: /etc/ssh/sshd_config.d
+        file_type: file
+        patterns: "*.conf"
+      register: disco_sshd_d_files
+      failed_when: false
+      tags: [security]
+
+    - name: Read sshd_config.d drop-in files
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ disco_sshd_d_files.files | default([]) }}"
+      register: disco_sshd_d_contents
+      failed_when: false
+      tags: [security]
+
+    - name: Read key PAM configs
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - /etc/pam.d/system-auth
+        - /etc/pam.d/password-auth
+        - /etc/pam.d/sshd
+        - /etc/pam.d/su
+      register: disco_pam_contents
+      failed_when: false
+      tags: [security]
+
+    - name: Get crypto policies (RHEL 8+)
+      ansible.builtin.command: update-crypto-policies --show
+      register: disco_crypto_policy
+      changed_when: false
+      failed_when: false
+      when: rhel_major | int >= 8
+      tags: [security]
+
+    # ==========================================================================
+    # Platform Detection
+    # ==========================================================================
+
+    - name: Read DMI system vendor
+      ansible.builtin.command: cat /sys/class/dmi/id/sys_vendor
+      register: disco_dmi_vendor
+      changed_when: false
+      failed_when: false
+      tags: [platform]
+
+    - name: Read DMI product name
+      ansible.builtin.command: cat /sys/class/dmi/id/product_name
+      register: disco_dmi_product
+      changed_when: false
+      failed_when: false
+      tags: [platform]
+
+    - name: Check for AWS EC2 (IMDS)
+      ansible.builtin.uri:
+        url: http://169.254.169.254/latest/meta-data/instance-id
+        timeout: 2
+      register: disco_ec2_check
+      failed_when: false
+      tags: [platform]
+
+    - name: Check for Azure VM (IMDS)
+      ansible.builtin.uri:
+        url: http://169.254.169.254/metadata/instance?api-version=2021-02-01
+        headers:
+          Metadata: "true"
+        timeout: 2
+      register: disco_azure_check
+      failed_when: false
+      tags: [platform]
+
+    - name: Detect virtualisation via systemd-detect-virt
+      ansible.builtin.command: systemd-detect-virt
+      register: disco_virt_type
+      changed_when: false
+      failed_when: false
+      tags: [platform]
+
+    - name: Detect virtualisation via virt-what
+      ansible.builtin.command: virt-what
+      register: disco_virt_what
+      changed_when: false
+      failed_when: false
+      tags: [platform]
+
+    # ==========================================================================
+    # Kernel, Modules, Boot
+    # ==========================================================================
+
+    - name: Get loaded kernel modules
+      ansible.builtin.command: lsmod
+      register: disco_lsmod
+      changed_when: false
+      failed_when: false
+      tags: [kernel]
+
+    - name: Detect third-party kernel modules
+      ansible.builtin.shell: |
+        for mod in $(lsmod | awk 'NR>1{print $1}'); do
+          info=$(modinfo "$mod" 2>/dev/null)
+          filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
+          if echo "$filename" | grep -qv '/kernel/'; then
+            author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
+            echo "${mod}|${filename}|${author}"
+          fi
+        done
+      register: disco_third_party_modules
+      changed_when: false
+      failed_when: false
+      tags: [kernel]
+
+    - name: Get date of last kernel update
+      ansible.builtin.shell: rpm -q --last kernel | head -1
+      register: disco_last_kernel_update
+      changed_when: false
+      failed_when: false
+      tags: [kernel]
+
+    - name: Check boot mode (UEFI vs BIOS)
+      ansible.builtin.stat:
+        path: /sys/firmware/efi
+      register: disco_efi_dir
+      failed_when: false
+      tags: [kernel]
+
+    - name: Get GRUB defaults
+      ansible.builtin.slurp:
+        src: /etc/default/grub
+      register: disco_grub_defaults
+      failed_when: false
+      tags: [kernel]
+
+    - name: Check for deprecated kernel modules
+      ansible.builtin.shell: |
+        lsmod | awk 'NR>1{print $1}' | while read mod; do
+          case "$mod" in
+            floppy|mptbase|mptscsih|mptspi|megaraid|aacraid|3w-9xxx|3w-sas)
+              echo "deprecated:$mod"
+              ;;
+          esac
+        done
+      register: disco_deprecated_modules
+      changed_when: false
+      failed_when: false
+      tags: [kernel]
+
+    # ==========================================================================
+    # Networking
+    # ==========================================================================
+
+    - name: Get routing table
+      ansible.builtin.command: ip route show
+      register: disco_routes
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    - name: Get resolv.conf
+      ansible.builtin.slurp:
+        src: /etc/resolv.conf
+      register: disco_resolv_conf
+      failed_when: false
+      tags: [network]
+
+    - name: Check if NetworkManager is active
+      ansible.builtin.command: systemctl is-active NetworkManager
+      register: disco_nm_active
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    - name: Get NetworkManager connection profiles
+      ansible.builtin.command: nmcli -t connection show
+      register: disco_nmcli_connections
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    - name: Check for network bonding
+      ansible.builtin.shell: ls /proc/net/bonding/ 2>/dev/null
+      register: disco_bond_interfaces
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    - name: Get bond details
+      ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
+      register: disco_bond_details
+      changed_when: false
+      failed_when: false
+      when: disco_bond_interfaces.stdout | default('') | length > 0
+      tags: [network]
+
+    - name: Check for network teaming
+      ansible.builtin.shell: |
+        teamdctl -h >/dev/null 2>&1 && \
+        for dev in $(ip -o link show type team 2>/dev/null | awk -F': ' '{print $2}'); do
+          echo "=== $dev ==="
+          teamdctl "$dev" state
+        done
+      register: disco_team_details
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    - name: List network-scripts ifcfg files
+      ansible.builtin.shell: ls /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null
+      register: disco_ifcfg_files
+      changed_when: false
+      failed_when: false
+      tags: [network]
+
+    # ==========================================================================
+    # Firewall
+    # ==========================================================================
+
+    - name: Check if firewalld is active
+      ansible.builtin.command: systemctl is-active firewalld
+      register: disco_firewalld_active
+      changed_when: false
+      failed_when: false
+      tags: [firewall]
+
+    - name: Get firewalld zones and rules
+      ansible.builtin.shell: firewall-cmd --list-all-zones 2>/dev/null
+      register: disco_firewalld_zones
+      changed_when: false
+      failed_when: false
+      when: disco_firewalld_active.stdout | default('') == 'active'
+      tags: [firewall]
+
+    - name: Check if iptables service is active
+      ansible.builtin.shell: systemctl is-active iptables 2>/dev/null || service iptables status 2>/dev/null | head -1
+      register: disco_iptables_active
+      changed_when: false
+      failed_when: false
+      tags: [firewall]
+
+    - name: Get iptables rules
+      ansible.builtin.command: iptables -L -n -v
+      register: disco_iptables_rules
+      changed_when: false
+      failed_when: false
+      tags: [firewall]
+
+    - name: Get nftables rules (RHEL 8+)
+      ansible.builtin.command: nft list ruleset
+      register: disco_nftables_rules
+      changed_when: false
+      failed_when: false
+      when: rhel_major | int >= 8
+      tags: [firewall]
+
+    # ==========================================================================
+    # Init System and Services
+    # ==========================================================================
+
+    - name: Detect init system
+      ansible.builtin.shell: |
+        if [ -d /run/systemd/system ]; then
+          echo "systemd"
+        else
+          echo "sysvinit"
+        fi
+      register: disco_init_system
+      changed_when: false
+      failed_when: false
+      tags: [services]
+
+    - name: Get enabled systemd services
+      ansible.builtin.command: systemctl list-unit-files --type=service --state=enabled --no-pager
+      register: disco_systemd_enabled
+      changed_when: false
+      failed_when: false
+      when: disco_init_system.stdout | default('') == 'systemd'
+      tags: [services]
+
+    - name: Get running systemd services
+      ansible.builtin.command: systemctl list-units --type=service --state=running --no-pager
+      register: disco_systemd_running
+      changed_when: false
+      failed_when: false
+      when: disco_init_system.stdout | default('') == 'systemd'
+      tags: [services]
+
+    - name: Get chkconfig services (sysvinit)
+      ansible.builtin.command: chkconfig --list
+      register: disco_chkconfig
+      changed_when: false
+      failed_when: false
+      when: disco_init_system.stdout | default('') != 'systemd'
+      tags: [services]
+
+    - name: Get tuned profile
+      ansible.builtin.command: tuned-adm active
+      register: disco_tuned_profile
+      changed_when: false
+      failed_when: false
+      tags: [services]
+
+    # ==========================================================================
+    # Storage
+    # ==========================================================================
+
+    - name: Get LVM physical volumes
+      ansible.builtin.command: pvs --noheadings --nosuffix --units g -o pv_name,vg_name,pv_size,pv_free
+      register: disco_pvs
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get LVM volume groups
+      ansible.builtin.command: vgs --noheadings --nosuffix --units g -o vg_name,vg_size,vg_free,lv_count,pv_count
+      register: disco_vgs
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get LVM logical volumes
+      ansible.builtin.command: lvs --noheadings --nosuffix --units g -o lv_name,vg_name,lv_size,lv_attr
+      register: disco_lvs
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get disk usage
+      ansible.builtin.command: df -hT
+      register: disco_df
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get block devices
+      ansible.builtin.command: lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT -n
+      register: disco_lsblk
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get fstab
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: disco_fstab
+      failed_when: false
+      tags: [storage]
+
+    - name: Get multipath config
+      ansible.builtin.command: multipath -ll
+      register: disco_multipath
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    - name: Get NFS/CIFS mounts
+      ansible.builtin.shell: mount | grep -E 'type (nfs|cifs|smb)'
+      register: disco_nfs_mounts
+      changed_when: false
+      failed_when: false
+      tags: [storage]
+
+    # ==========================================================================
+    # Package Management and Repos
+    # ==========================================================================
+
+    - name: Get installed package count
+      ansible.builtin.shell: rpm -qa | wc -l
+      register: disco_pkg_count
+      changed_when: false
+      failed_when: false
+      tags: [packages]
+
+    - name: Get non-Red Hat packages
+      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}|%{VENDOR}|%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -iv 'Red Hat'
+      register: disco_non_rh_packages
+      changed_when: false
+      failed_when: false
+      tags: [packages]
+
+    - name: Get yum/dnf versionlocks
+      ansible.builtin.shell: |
+        if command -v dnf >/dev/null 2>&1; then
+          dnf versionlock list 2>/dev/null || echo "versionlock plugin not installed"
+        elif command -v yum >/dev/null 2>&1; then
+          yum versionlock list 2>/dev/null || echo "versionlock plugin not installed"
+        fi
+      register: disco_versionlocks
+      changed_when: false
+      failed_when: false
+      tags: [packages]
+
+    - name: Get enabled repos
+      ansible.builtin.shell: |
+        if command -v dnf >/dev/null 2>&1; then
+          dnf repolist enabled 2>/dev/null
+        else
+          yum repolist enabled 2>/dev/null
+        fi
+      register: disco_repos_enabled
+      changed_when: false
+      failed_when: false
+      tags: [packages]
+
+    - name: Detect non-satellite repos
+      ansible.builtin.shell: |
+        for f in /etc/yum.repos.d/*.repo; do
+          [ -f "$f" ] || continue
+          if grep -qE '^\s*baseurl\s*=' "$f" 2>/dev/null; then
+            if ! grep -qiE 'satellite|capsule|katello|cdn\.redhat\.com' "$f" 2>/dev/null; then
+              echo "$f"
+              grep -E '^\s*(name|baseurl)\s*=' "$f"
+              echo "---"
+            fi
+          fi
+        done
+      register: disco_non_satellite_repos
+      changed_when: false
+      failed_when: false
+      tags: [packages]
+
+    # ==========================================================================
+    # Backup and Monitoring Agents
+    # ==========================================================================
+
+    - name: Detect backup and monitoring agents
+      ansible.builtin.shell: |
+        found=""
+        [ -e /usr/openv/netbackup/bin/bpclntcmd ] && found="${found}netbackup\n"
+        [ -d /opt/commvault ] && found="${found}commvault\n"
+        [ -e /opt/tivoli/tsm/client/ba/bin/dsmc ] && found="${found}tsm_spectrum_protect\n"
+        [ -d /opt/veeamapp ] && found="${found}veeam\n"
+        [ -d /opt/rubrik ] && found="${found}rubrik\n"
+        [ -d /opt/cohesity ] && found="${found}cohesity\n"
+        [ -e /etc/zabbix/zabbix_agentd.conf ] && found="${found}zabbix\n"
+        [ -e /etc/nagios/nrpe.cfg ] && found="${found}nagios_nrpe\n"
+        [ -d /opt/splunkforwarder ] && found="${found}splunk\n"
+        [ -d /etc/datadog-agent ] && found="${found}datadog\n"
+        [ -d /opt/CrowdStrike ] && found="${found}crowdstrike\n"
+        [ -d /usr/local/qualys ] && found="${found}qualys\n"
+        [ -d /opt/Tanium ] && found="${found}tanium\n"
+        [ -d /opt/bacula ] && found="${found}bacula\n"
+        [ -d /opt/amanda ] && found="${found}amanda\n"
+        printf "$found"
+      register: disco_backup_monitoring
+      changed_when: false
+      failed_when: false
+      tags: [backup]
+
+    # ==========================================================================
+    # Satellite / Subscription
+    # ==========================================================================
+
+    - name: Get subscription-manager identity
+      ansible.builtin.command: subscription-manager identity
+      register: disco_sub_identity
+      changed_when: false
+      failed_when: false
+      tags: [satellite]
+
+    - name: Get subscription-manager status
+      ansible.builtin.command: subscription-manager status
+      register: disco_sub_status
+      changed_when: false
+      failed_when: false
+      tags: [satellite]
+
+    - name: Get Satellite server from rhsm.conf
+      ansible.builtin.shell: grep -E '^\s*(hostname|baseurl)' /etc/rhsm/rhsm.conf 2>/dev/null
+      register: disco_satellite_server
+      changed_when: false
+      failed_when: false
+      tags: [satellite]
+
+    - name: Get katello/satellite packages
+      ansible.builtin.shell: rpm -qa | grep -iE 'katello|satellite|gofer'
+      register: disco_katello_info
+      changed_when: false
+      failed_when: false
+      tags: [satellite]
+
+    # ==========================================================================
+    # Filesystem Exploration
+    # ==========================================================================
+
+    - name: List /opt subdirectories
+      ansible.builtin.shell: ls -1d /opt/*/ 2>/dev/null || echo "empty or does not exist"
+      register: disco_opt_listing
+      changed_when: false
+      failed_when: false
+      tags: [filesystem]
+
+    - name: List /data subdirectories
+      ansible.builtin.shell: ls -1d /data/*/ 2>/dev/null || echo "empty or does not exist"
+      register: disco_data_listing
+      changed_when: false
+      failed_when: false
+      tags: [filesystem]
+
+    - name: Check third-party software in common paths
+      ansible.builtin.shell: |
+        for d in /opt /usr/local/bin /usr/local/sbin /app /apps /software; do
+          if [ -d "$d" ]; then
+            listing=$(ls -1 "$d" 2>/dev/null)
+            if [ -n "$listing" ]; then
+              echo "=== ${d} ==="
+              echo "$listing"
+            fi
+          fi
+        done
+      register: disco_third_party_paths
+      changed_when: false
+      failed_when: false
+      tags: [filesystem]
+
+    # ==========================================================================
+    # RHEL 9/10 Migration Readiness
+    # ==========================================================================
+
+    - name: Get Python versions
+      ansible.builtin.shell: |
+        echo "python:$(python --version 2>&1 || echo 'not found')"
+        echo "python2:$(python2 --version 2>&1 || echo 'not found')"
+        echo "python3:$(python3 --version 2>&1 || echo 'not found')"
+        echo "platform-python:$(/usr/libexec/platform-python --version 2>&1 || echo 'not found')"
+      register: disco_python_versions
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Get 32-bit packages
+      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -E '\.i[36]86$'
+      register: disco_32bit_packages
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check for deprecated packages
+      ansible.builtin.shell: rpm -q ntp sendmail vsftpd xinetd talk ypserv ypbind iptables-services net-tools 2>/dev/null | grep -v 'not installed'
+      register: disco_deprecated_packages
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check chronyd vs ntpd status
+      ansible.builtin.shell: |
+        echo "ntpd:$(systemctl is-active ntpd 2>/dev/null || service ntpd status 2>/dev/null | grep -o 'running\|stopped' | head -1 || echo 'not found')"
+        echo "chronyd:$(systemctl is-active chronyd 2>/dev/null || echo 'not found')"
+      register: disco_time_services
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check for xinetd services
+      ansible.builtin.shell: |
+        if [ -d /etc/xinetd.d ]; then
+          ls /etc/xinetd.d/ 2>/dev/null
+        else
+          echo "xinetd not present"
+        fi
+      register: disco_xinetd
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check legacy network config vs NetworkManager
+      ansible.builtin.shell: |
+        count=$(ls /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null | wc -l)
+        nm_status=$(systemctl is-active NetworkManager 2>/dev/null || echo "inactive")
+        echo "ifcfg_count:${count},nm_status:${nm_status}"
+      register: disco_legacy_network
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Get OpenSSL version
+      ansible.builtin.command: openssl version
+      register: disco_openssl_version
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check for NFS/CIFS fstab entries and deprecated mount options
+      ansible.builtin.shell: grep -E 'nfs|cifs|ext[23]|_netdev' /etc/fstab 2>/dev/null || echo "none found"
+      register: disco_fstab_concerns
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Get root crontab
+      ansible.builtin.command: crontab -l
+      register: disco_root_crontab
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Get system crontab
+      ansible.builtin.slurp:
+        src: /etc/crontab
+      register: disco_system_crontab
+      failed_when: false
+      tags: [migration]
+
+    - name: List cron.d entries
+      ansible.builtin.shell: ls -1 /etc/cron.d/ 2>/dev/null
+      register: disco_cron_d
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    # ==========================================================================
+    # Common application detection
+    # ==========================================================================
+
+    - name: Check for common server applications
+      ansible.builtin.shell: |
+        found=""
+        rpm -q httpd >/dev/null 2>&1 && found="${found}httpd\n"
+        rpm -q nginx >/dev/null 2>&1 && found="${found}nginx\n"
+        rpm -q mysql-server >/dev/null 2>&1 && found="${found}mysql-server\n"
+        rpm -q mariadb-server >/dev/null 2>&1 && found="${found}mariadb-server\n"
+        rpm -q postgresql-server >/dev/null 2>&1 && found="${found}postgresql-server\n"
+        rpm -q oracle-database-preinstall* >/dev/null 2>&1 && found="${found}oracle-preinstall\n"
+        rpm -q tomcat >/dev/null 2>&1 && found="${found}tomcat\n"
+        rpm -q java-*-openjdk >/dev/null 2>&1 && found="${found}$(rpm -q java-*-openjdk 2>/dev/null | head -1)\n"
+        rpm -q docker >/dev/null 2>&1 && found="${found}docker\n"
+        rpm -q podman >/dev/null 2>&1 && found="${found}podman\n"
+        printf "$found"
+      register: disco_common_apps
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+
+# ==============================================================================
+# Generate the combined YAML report
+# ==============================================================================
+
+- name: Generate discovery report
+  hosts: localhost
+  gather_facts: true
+  connection: local
+
+  vars:
+    output_dir: "./output"
+    report_file: "{{ output_dir }}/discovery_report.yml"
+
+  tasks:
+
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render consolidated discovery report
+      ansible.builtin.template:
+        src: templates/report.yml.j2
+        dest: "{{ report_file }}"
+        mode: "0644"
+
+    - name: Report location
+      ansible.builtin.debug:
+        msg: "Discovery report written to {{ report_file }}"
