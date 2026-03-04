@@ -17,10 +17,20 @@
   become: true
 
   vars:
-    output_dir: "./output"
     rhel_major: "{{ ansible_distribution_major_version }}"
 
   tasks:
+
+    # ==========================================================================
+    # System Identity
+    # ==========================================================================
+
+    - name: Get RHEL release file
+      ansible.builtin.slurp:
+        src: /etc/redhat-release
+      register: disco_redhat_release
+      failed_when: false
+      tags: [system]
 
     # ==========================================================================
     # SELinux
@@ -155,16 +165,16 @@
     # ==========================================================================
 
     - name: Read DMI system vendor
-      ansible.builtin.command: cat /sys/class/dmi/id/sys_vendor
+      ansible.builtin.slurp:
+        src: /sys/class/dmi/id/sys_vendor
       register: disco_dmi_vendor
-      changed_when: false
       failed_when: false
       tags: [platform]
 
     - name: Read DMI product name
-      ansible.builtin.command: cat /sys/class/dmi/id/product_name
+      ansible.builtin.slurp:
+        src: /sys/class/dmi/id/product_name
       register: disco_dmi_product
-      changed_when: false
       failed_when: false
       tags: [platform]
 
@@ -280,7 +290,10 @@
       tags: [network]
 
     - name: Check if NetworkManager is active
-      ansible.builtin.command: systemctl is-active NetworkManager
+      ansible.builtin.shell: >-
+        systemctl is-active NetworkManager 2>/dev/null ||
+        service NetworkManager status 2>/dev/null | grep -o 'running\|stopped' | head -1 ||
+        echo "not found"
       register: disco_nm_active
       changed_when: false
       failed_when: false
@@ -487,7 +500,7 @@
       tags: [packages]
 
     - name: Get non-Red Hat packages
-      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}|%{VENDOR}|%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -iv 'Red Hat'
+      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}|%{VENDOR}|%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -iv 'Red Hat' | grep -v '^gpg-pubkey|'
       register: disco_non_rh_packages
       changed_when: false
       failed_when: false
@@ -521,10 +534,10 @@
       ansible.builtin.shell: |
         for f in /etc/yum.repos.d/*.repo; do
           [ -f "$f" ] || continue
-          if grep -qE '^\s*baseurl\s*=' "$f" 2>/dev/null; then
+          if grep -qE '^\s*(baseurl|mirrorlist|metalink)\s*=' "$f" 2>/dev/null; then
             if ! grep -qiE 'satellite|capsule|katello|cdn\.redhat\.com' "$f" 2>/dev/null; then
               echo "$f"
-              grep -E '^\s*(name|baseurl)\s*=' "$f"
+              grep -E '^\s*(name|baseurl|mirrorlist|metalink)\s*=' "$f"
               echo "---"
             fi
           fi

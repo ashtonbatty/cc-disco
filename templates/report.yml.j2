@@ -16,6 +16,7 @@
     fqdn: "{{ hv.ansible_fqdn | default('unknown') }}"
     os: "{{ hv.ansible_distribution | default('unknown') }} {{ hv.ansible_distribution_version | default('') }}"
     rhel_release: "{{ hv.ansible_distribution_major_version | default('unknown') }}"
+    rhel_release_string: "{{ (hv.disco_redhat_release.content | default('') | b64decode) | trim }}"
     kernel: "{{ hv.ansible_kernel | default('unknown') }}"
     architecture: "{{ hv.ansible_architecture | default('unknown') }}"
     uptime_seconds: {{ hv.ansible_uptime_seconds | default(0) }}
@@ -37,15 +38,17 @@
   # Platform
   # ===========================================================================
   platform:
-    dmi_vendor: "{{ hv.disco_dmi_vendor.stdout | default('unknown') | trim }}"
-    dmi_product: "{{ hv.disco_dmi_product.stdout | default('unknown') | trim }}"
+{% set dmi_vendor_val = (hv.disco_dmi_vendor.content | default('') | b64decode) | trim %}
+{% set dmi_product_val = (hv.disco_dmi_product.content | default('') | b64decode) | trim %}
+    dmi_vendor: "{{ dmi_vendor_val | default('unknown') }}"
+    dmi_product: "{{ dmi_product_val | default('unknown') }}"
     virt_type: "{{ hv.disco_virt_type.stdout | default('unknown') | trim }}"
     virt_what: "{{ hv.disco_virt_what.stdout | default('unknown') | trim }}"
 {% if hv.disco_ec2_check.status | default(0) | int == 200 %}
     detected_platform: "aws_ec2"
 {% elif hv.disco_azure_check.status | default(0) | int == 200 %}
     detected_platform: "azure_vm"
-{% elif 'VMware' in (hv.disco_dmi_vendor.stdout | default('')) %}
+{% elif 'VMware' in dmi_vendor_val %}
     detected_platform: "vmware"
 {% elif (hv.disco_virt_what.stdout | default('') | trim) == '' and (hv.disco_virt_type.stdout | default('none') | trim) == 'none' %}
     detected_platform: "bare_metal"
@@ -64,18 +67,26 @@
     all_ipv4_addresses:
 {% for addr in hv.ansible_all_ipv4_addresses | default([]) %}
       - "{{ addr }}"
+{% else %}
+      []
 {% endfor %}
     all_ipv6_addresses:
 {% for addr in hv.ansible_all_ipv6_addresses | default([]) %}
       - "{{ addr }}"
+{% else %}
+      []
 {% endfor %}
     dns_nameservers:
 {% for ns in (hv.ansible_dns | default({})).nameservers | default([]) %}
       - "{{ ns }}"
+{% else %}
+      []
 {% endfor %}
     dns_search:
 {% for domain in (hv.ansible_dns | default({})).search | default([]) %}
       - "{{ domain }}"
+{% else %}
+      []
 {% endfor %}
     interfaces:
 {% for iface in hv.ansible_interfaces | default([]) | sort %}
@@ -86,6 +97,8 @@
         macaddress: "{{ iface_data.macaddress | default('none') }}"
         type: "{{ iface_data.type | default('unknown') }}"
         active: {{ iface_data.active | default(false) }}
+{% else %}
+      []
 {% endfor %}
     routes: |
 {{ hv.disco_routes.stdout | default('not collected') | indent(6, true) }}
@@ -132,6 +145,8 @@
         size_total_bytes: {{ mount.size_total | default(0) }}
         size_available_bytes: {{ mount.size_available | default(0) }}
         options: "{{ mount.options | default('') }}"
+{% else %}
+      []
 {% endfor %}
     disk_usage: |
 {{ hv.disco_df.stdout | default('not collected') | indent(6, true) }}
@@ -173,6 +188,8 @@
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
 {% endif %}
+{% else %}
+      []
 {% endfor %}
     sshd_config: |
 {{ (hv.disco_sshd_config.content | default('') | b64decode) | indent(6, true) }}
@@ -184,6 +201,8 @@
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
 {% endif %}
+{% else %}
+      []
 {% endfor %}
 {% endif %}
     pam:
@@ -193,6 +212,8 @@
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
 {% endif %}
+{% else %}
+      []
 {% endfor %}
     crypto_policy: "{{ hv.disco_crypto_policy.stdout | default('N/A (pre-RHEL 8)') | trim }}"
 
@@ -222,10 +243,14 @@
       - module: "{{ parts[0] | default('unknown') }}"
         filename: "{{ parts[1] | default('unknown') }}"
         author: "{{ parts[2] | default('unknown') }}"
+{% else %}
+      []
 {% endfor %}
     deprecated_modules:
 {% for line in hv.disco_deprecated_modules.stdout_lines | default([]) %}
       - "{{ line.split(':')[1] | default(line) }}"
+{% else %}
+      []
 {% endfor %}
     last_kernel_update: "{{ hv.disco_last_kernel_update.stdout | default('unknown') | trim }}"
     grub_defaults: |
@@ -259,6 +284,8 @@
       - name: "{{ parts[0] | default('unknown') }}"
         vendor: "{{ parts[1] | default('unknown') }}"
         version: "{{ parts[2] | default('unknown') }}"
+{% else %}
+      []
 {% endfor %}
     versionlocks: |
 {{ hv.disco_versionlocks.stdout | default('none') | indent(6, true) }}
@@ -286,6 +313,8 @@
 {% if agent | trim | length > 0 %}
     - "{{ agent | trim }}"
 {% endif %}
+{% else %}
+    []
 {% endfor %}
 
   # ===========================================================================
@@ -296,6 +325,8 @@
 {% if app | trim | length > 0 %}
     - "{{ app | trim }}"
 {% endif %}
+{% else %}
+    []
 {% endfor %}
 
   # ===========================================================================
@@ -305,10 +336,14 @@
     opt:
 {% for entry in hv.disco_opt_listing.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
+{% else %}
+      []
 {% endfor %}
     data:
 {% for entry in hv.disco_data_listing.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
+{% else %}
+      []
 {% endfor %}
     third_party_paths: |
 {{ hv.disco_third_party_paths.stdout | default('not collected') | indent(6, true) }}
@@ -329,6 +364,8 @@
     deprecated_packages:
 {% for pkg in hv.disco_deprecated_packages.stdout_lines | default([]) %}
       - "{{ pkg }}"
+{% else %}
+      []
 {% endfor %}
     time_service: |
 {{ hv.disco_time_services.stdout | default('not collected') | indent(6, true) }}
@@ -345,6 +382,8 @@
     cron_d_entries:
 {% for entry in hv.disco_cron_d.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
+{% else %}
+      []
 {% endfor %}
 
 {% endif %}
