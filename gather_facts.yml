@@ -21,6 +21,17 @@
 
   tasks:
 
+    - name: Collect package facts for structured package analysis
+      ansible.builtin.package_facts:
+        manager: auto
+      failed_when: false
+      tags: [packages, migration]
+
+    - name: Collect service facts for structured service analysis
+      ansible.builtin.service_facts:
+      failed_when: false
+      tags: [services, network, migration]
+
     # ==========================================================================
     # System Identity
     # ==========================================================================
@@ -222,7 +233,9 @@
       tags: [kernel]
 
     - name: Detect third-party kernel modules
+      # Module author/filepath correlation is not exposed by Ansible facts.
       ansible.builtin.shell: |
+        set -o pipefail
         for mod in $(lsmod | awk 'NR>1{print $1}'); do
           info=$(modinfo "$mod" 2>/dev/null)
           filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
@@ -231,13 +244,18 @@
             echo "${mod}|${filename}|${author}"
           fi
         done
+      args:
+        executable: /bin/bash
       register: disco_third_party_modules
       changed_when: false
       failed_when: false
       tags: [kernel]
 
     - name: Get date of last kernel update
+      # Package install chronology for kernel NEVRAs is only available via rpm query output.
       ansible.builtin.shell: rpm -q --last kernel | head -1
+      args:
+        executable: /bin/bash
       register: disco_last_kernel_update
       changed_when: false
       failed_when: false
@@ -258,7 +276,9 @@
       tags: [kernel]
 
     - name: Check for deprecated kernel modules
+      # Deprecated module detection requires policy matching against loaded module names.
       ansible.builtin.shell: |
+        set -o pipefail
         lsmod | awk 'NR>1{print $1}' | while read mod; do
           case "$mod" in
             floppy|mptbase|mptscsih|mptspi|megaraid|aacraid|3w-9xxx|3w-sas)
@@ -266,6 +286,8 @@
               ;;
           esac
         done
+      args:
+        executable: /bin/bash
       register: disco_deprecated_modules
       changed_when: false
       failed_when: false
@@ -289,14 +311,19 @@
       failed_when: false
       tags: [network]
 
-    - name: Check if NetworkManager is active
-      ansible.builtin.shell: >-
-        systemctl is-active NetworkManager 2>/dev/null ||
-        service NetworkManager status 2>/dev/null | grep -o 'running\|stopped' | head -1 ||
-        echo "not found"
-      register: disco_nm_active
-      changed_when: false
-      failed_when: false
+    - name: Determine NetworkManager state from service facts
+      ansible.builtin.set_fact:
+        disco_nm_active:
+          stdout: >-
+            {{
+              ansible_facts.services['NetworkManager.service'].state
+              if 'NetworkManager.service' in (ansible_facts.services | default({}))
+              else (
+                ansible_facts.services['NetworkManager'].state
+                if 'NetworkManager' in (ansible_facts.services | default({}))
+                else 'not found'
+              )
+            }}
       tags: [network]
 
     - name: Get NetworkManager connection profiles
@@ -307,6 +334,7 @@
       tags: [network]
 
     - name: Check for network bonding
+      # /proc/net/bonding is kernel-generated and not normalized by Ansible facts.
       ansible.builtin.shell: ls /proc/net/bonding/ 2>/dev/null
       register: disco_bond_interfaces
       changed_when: false
@@ -314,6 +342,7 @@
       tags: [network]
 
     - name: Get bond details
+      # Bond mode/slave details are only available in /proc/net/bonding/* text files.
       ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
       register: disco_bond_details
       changed_when: false
@@ -322,21 +351,29 @@
       tags: [network]
 
     - name: Check for network teaming
+      # teamdctl state data has no equivalent Ansible fact/module on RHEL 6/7/8.
       ansible.builtin.shell: |
+        set -o pipefail
+        command -v teamdctl >/dev/null 2>&1 || { echo "teamdctl not found"; exit 0; }
+        command -v ip >/dev/null 2>&1 || { echo "ip not found"; exit 0; }
         teamdctl -h >/dev/null 2>&1 && \
         for dev in $(ip -o link show type team 2>/dev/null | awk -F': ' '{print $2}'); do
           echo "=== $dev ==="
           teamdctl "$dev" state
         done
+      args:
+        executable: /bin/bash
       register: disco_team_details
       changed_when: false
       failed_when: false
       tags: [network]
 
     - name: List network-scripts ifcfg files
-      ansible.builtin.shell: ls /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null
+      ansible.builtin.find:
+        paths: /etc/sysconfig/network-scripts
+        patterns: "ifcfg-*"
+        file_type: file
       register: disco_ifcfg_files
-      changed_when: false
       failed_when: false
       tags: [network]
 
@@ -352,7 +389,13 @@
       tags: [firewall]
 
     - name: Get firewalld zones and rules
-      ansible.builtin.shell: firewall-cmd --list-all-zones 2>/dev/null
+      # Zone/rich-rule dump requires firewall-cmd textual output.
+      ansible.builtin.shell: |
+        set -o pipefail
+        command -v firewall-cmd >/dev/null 2>&1 || { echo "firewall-cmd not found"; exit 0; }
+        firewall-cmd --list-all-zones 2>/dev/null
+      args:
+        executable: /bin/bash
       register: disco_firewalld_zones
       changed_when: false
       failed_when: false
@@ -360,7 +403,18 @@
       tags: [firewall]
 
     - name: Check if iptables service is active
-      ansible.builtin.shell: systemctl is-active iptables 2>/dev/null || service iptables status 2>/dev/null | head -1
+      # Mixed systemd/sysv service status fallback is required for older releases.
+      ansible.builtin.shell: |
+        set -o pipefail
+        if command -v systemctl >/dev/null 2>&1; then
+          systemctl is-active iptables 2>/dev/null && exit 0
+        fi
+        if command -v service >/dev/null 2>&1; then
+          service iptables status 2>/dev/null | head -1 && exit 0
+        fi
+        echo "not found"
+      args:
+        executable: /bin/bash
       register: disco_iptables_active
       changed_when: false
       failed_when: false
@@ -386,34 +440,29 @@
     # ==========================================================================
 
     - name: Detect init system
-      ansible.builtin.shell: |
-        if [ -d /run/systemd/system ]; then
-          echo "systemd"
-        else
-          echo "sysvinit"
-        fi
-      register: disco_init_system
+      ansible.builtin.set_fact:
+        disco_init_system:
+          stdout: "{{ 'systemd' if ansible_service_mgr | default('') == 'systemd' else 'sysvinit' }}"
       changed_when: false
       failed_when: false
       tags: [services]
 
-    - name: Get enabled systemd services
-      ansible.builtin.command: systemctl list-unit-files --type=service --state=enabled --no-pager
-      register: disco_systemd_enabled
-      changed_when: false
-      failed_when: false
-      when: disco_init_system.stdout | default('') == 'systemd'
-      tags: [services]
-
-    - name: Get running systemd services
-      ansible.builtin.command: systemctl list-units --type=service --state=running --no-pager
-      register: disco_systemd_running
-      changed_when: false
-      failed_when: false
-      when: disco_init_system.stdout | default('') == 'systemd'
+    - name: Build enabled and running service lists from service facts
+      ansible.builtin.set_fact:
+        disco_systemd_enabled:
+          stdout: |
+            {% for svc_name, svc in (ansible_facts.services | default({})) | dictsort %}
+            {% if svc.status | default('') == 'enabled' %}{{ svc_name }}{% endif %}
+            {% endfor %}
+        disco_systemd_running:
+          stdout: |
+            {% for svc_name, svc in (ansible_facts.services | default({})) | dictsort %}
+            {% if svc.state | default('') == 'running' %}{{ svc_name }}{% endif %}
+            {% endfor %}
       tags: [services]
 
     - name: Get chkconfig services (sysvinit)
+      # SysV chkconfig listing has no cross-version fact replacement.
       ansible.builtin.command: chkconfig --list
       register: disco_chkconfig
       changed_when: false
@@ -453,11 +502,13 @@
       failed_when: false
       tags: [storage]
 
-    - name: Get disk usage
-      ansible.builtin.command: df -hT
-      register: disco_df
-      changed_when: false
-      failed_when: false
+    - name: Build disk usage summary from mount facts
+      ansible.builtin.set_fact:
+        disco_df:
+          stdout: |
+            {% for mount in ansible_mounts | default([]) %}
+            {{ mount.mount }}|{{ mount.fstype }}|{{ mount.device }}|{{ mount.size_total | default(0) }}|{{ mount.size_available | default(0) }}
+            {% endfor %}
       tags: [storage]
 
     - name: Get block devices
@@ -481,57 +532,83 @@
       failed_when: false
       tags: [storage]
 
-    - name: Get NFS/CIFS mounts
-      ansible.builtin.shell: mount | grep -E 'type (nfs|cifs|smb)'
-      register: disco_nfs_mounts
-      changed_when: false
-      failed_when: false
+    - name: Get NFS/CIFS mounts from mount facts
+      ansible.builtin.set_fact:
+        disco_nfs_mounts:
+          stdout: |
+            {% for mount in ansible_mounts | default([]) if mount.fstype in ['nfs', 'nfs4', 'cifs', 'smbfs'] %}
+            {{ mount.mount }} {{ mount.device }} {{ mount.fstype }} {{ mount.options | default('') }}
+            {% endfor %}
       tags: [storage]
 
     # ==========================================================================
     # Package Management and Repos
     # ==========================================================================
 
-    - name: Get installed package count
-      ansible.builtin.shell: rpm -qa | wc -l
-      register: disco_pkg_count
-      changed_when: false
-      failed_when: false
+    - name: Get installed package count from package facts
+      ansible.builtin.set_fact:
+        disco_pkg_count:
+          stdout: "{{ (ansible_facts.packages | default({})) | length }}"
       tags: [packages]
 
-    - name: Get non-Red Hat packages
-      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}|%{VENDOR}|%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -iv 'Red Hat' | grep -v '^gpg-pubkey|'
-      register: disco_non_rh_packages
+    - name: Build non-Red Hat package list from package facts
+      ansible.builtin.set_fact:
+        disco_non_rh_packages:
+          stdout_lines: []
       changed_when: false
-      failed_when: false
+      tags: [packages]
+
+    - name: Append non-Red Hat package output lines
+      ansible.builtin.set_fact:
+        disco_non_rh_packages:
+          stdout_lines: "{{ disco_non_rh_packages.stdout_lines + [item.key ~ '|' ~ (item.value.0.vendor | default('unknown')) ~ '|' ~ (item.value.0.version | default('unknown') ~ '-' ~ item.value.0.release | default('') ~ '.' ~ item.value.0.arch | default('unknown'))] }}"
+      loop: "{{ (ansible_facts.packages | default({})) | dict2items }}"
+      when:
+        - item.key != 'gpg-pubkey'
+        - (item.value.0.vendor | default('')) is not search('(?i)Red Hat')
+      changed_when: false
       tags: [packages]
 
     - name: Get yum/dnf versionlocks
+      # versionlock plugin output is command-specific and not exposed via Ansible facts.
       ansible.builtin.shell: |
+        set -o pipefail
         if command -v dnf >/dev/null 2>&1; then
           dnf versionlock list 2>/dev/null || echo "versionlock plugin not installed"
         elif command -v yum >/dev/null 2>&1; then
           yum versionlock list 2>/dev/null || echo "versionlock plugin not installed"
+        else
+          echo "dnf/yum not found"
         fi
+      args:
+        executable: /bin/bash
       register: disco_versionlocks
       changed_when: false
       failed_when: false
       tags: [packages]
 
     - name: Get enabled repos
+      # Repo enablement details are sourced from yum/dnf CLI; no unified built-in fact exists.
       ansible.builtin.shell: |
+        set -o pipefail
         if command -v dnf >/dev/null 2>&1; then
           dnf repolist enabled 2>/dev/null
-        else
+        elif command -v yum >/dev/null 2>&1; then
           yum repolist enabled 2>/dev/null
+        else
+          echo "dnf/yum not found"
         fi
+      args:
+        executable: /bin/bash
       register: disco_repos_enabled
       changed_when: false
       failed_when: false
       tags: [packages]
 
     - name: Detect non-satellite repos
+      # Parsing repo file key/value content has no direct module output for this exact schema.
       ansible.builtin.shell: |
+        set -o pipefail
         for f in /etc/yum.repos.d/*.repo; do
           [ -f "$f" ] || continue
           if grep -qE '^\s*(baseurl|mirrorlist|metalink)\s*=' "$f" 2>/dev/null; then
@@ -542,6 +619,8 @@
             fi
           fi
         done
+      args:
+        executable: /bin/bash
       register: disco_non_satellite_repos
       changed_when: false
       failed_when: false
@@ -552,7 +631,9 @@
     # ==========================================================================
 
     - name: Detect backup and monitoring agents
+      # Agent footprint checks are path-based heuristics and not exposed as module facts.
       ansible.builtin.shell: |
+        set -o pipefail
         found=""
         [ -e /usr/openv/netbackup/bin/bpclntcmd ] && found="${found}netbackup\n"
         [ -d /opt/commvault ] && found="${found}commvault\n"
@@ -570,6 +651,8 @@
         [ -d /opt/bacula ] && found="${found}bacula\n"
         [ -d /opt/amanda ] && found="${found}amanda\n"
         printf "$found"
+      args:
+        executable: /bin/bash
       register: disco_backup_monitoring
       changed_when: false
       failed_when: false
@@ -594,14 +677,26 @@
       tags: [satellite]
 
     - name: Get Satellite server from rhsm.conf
-      ansible.builtin.shell: grep -E '^\s*(hostname|baseurl)' /etc/rhsm/rhsm.conf 2>/dev/null
+      # Extracting specific rhsm.conf keys is easiest via targeted regex parse.
+      ansible.builtin.shell: |
+        set -o pipefail
+        [ -f /etc/rhsm/rhsm.conf ] || { echo "rhsm.conf missing"; exit 0; }
+        grep -E '^\s*(hostname|baseurl)' /etc/rhsm/rhsm.conf 2>/dev/null || echo "none"
+      args:
+        executable: /bin/bash
       register: disco_satellite_server
       changed_when: false
       failed_when: false
       tags: [satellite]
 
     - name: Get katello/satellite packages
-      ansible.builtin.shell: rpm -qa | grep -iE 'katello|satellite|gofer'
+      # Pattern-based package name matching uses rpm query text.
+      ansible.builtin.shell: |
+        set -o pipefail
+        command -v rpm >/dev/null 2>&1 || { echo "rpm not found"; exit 0; }
+        rpm -qa | grep -iE 'katello|satellite|gofer' || echo "none"
+      args:
+        executable: /bin/bash
       register: disco_katello_info
       changed_when: false
       failed_when: false
@@ -612,21 +707,27 @@
     # ==========================================================================
 
     - name: List /opt subdirectories
-      ansible.builtin.shell: ls -1d /opt/*/ 2>/dev/null || echo "empty or does not exist"
+      ansible.builtin.find:
+        paths: /opt
+        file_type: directory
+        recurse: false
       register: disco_opt_listing
-      changed_when: false
       failed_when: false
       tags: [filesystem]
 
     - name: List /data subdirectories
-      ansible.builtin.shell: ls -1d /data/*/ 2>/dev/null || echo "empty or does not exist"
+      ansible.builtin.find:
+        paths: /data
+        file_type: directory
+        recurse: false
       register: disco_data_listing
-      changed_when: false
       failed_when: false
       tags: [filesystem]
 
     - name: Check third-party software in common paths
+      # This is a bespoke directory inventory across multiple optional roots.
       ansible.builtin.shell: |
+        set -o pipefail
         for d in /opt /usr/local/bin /usr/local/sbin /app /apps /software; do
           if [ -d "$d" ]; then
             listing=$(ls -1 "$d" 2>/dev/null)
@@ -636,6 +737,8 @@
             fi
           fi
         done
+      args:
+        executable: /bin/bash
       register: disco_third_party_paths
       changed_when: false
       failed_when: false
@@ -646,57 +749,112 @@
     # ==========================================================================
 
     - name: Get Python versions
+      # Python interpreter discovery across legacy paths requires command probing.
       ansible.builtin.shell: |
-        echo "python:$(python --version 2>&1 || echo 'not found')"
-        echo "python2:$(python2 --version 2>&1 || echo 'not found')"
-        echo "python3:$(python3 --version 2>&1 || echo 'not found')"
-        echo "platform-python:$(/usr/libexec/platform-python --version 2>&1 || echo 'not found')"
+        set -o pipefail
+        if command -v python >/dev/null 2>&1; then
+          echo "python:$(python --version 2>&1)"
+        else
+          echo "python:not found"
+        fi
+        if command -v python2 >/dev/null 2>&1; then
+          echo "python2:$(python2 --version 2>&1)"
+        else
+          echo "python2:not found"
+        fi
+        if command -v python3 >/dev/null 2>&1; then
+          echo "python3:$(python3 --version 2>&1)"
+        else
+          echo "python3:not found"
+        fi
+        if [ -x /usr/libexec/platform-python ]; then
+          echo "platform-python:$(/usr/libexec/platform-python --version 2>&1)"
+        else
+          echo "platform-python:not found"
+        fi
+      args:
+        executable: /bin/bash
       register: disco_python_versions
       changed_when: false
       failed_when: false
       tags: [migration]
 
-    - name: Get 32-bit packages
-      ansible.builtin.shell: rpm -qa --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' | grep -E '\.i[36]86$'
-      register: disco_32bit_packages
+    - name: Build 32-bit package list from package facts
+      ansible.builtin.set_fact:
+        disco_32bit_packages:
+          stdout_lines: []
       changed_when: false
-      failed_when: false
       tags: [migration]
 
-    - name: Check for deprecated packages
-      ansible.builtin.shell: rpm -q ntp sendmail vsftpd xinetd talk ypserv ypbind iptables-services net-tools 2>/dev/null | grep -v 'not installed'
-      register: disco_deprecated_packages
+    - name: Append 32-bit package entries
+      ansible.builtin.set_fact:
+        disco_32bit_packages:
+          stdout_lines: "{{ disco_32bit_packages.stdout_lines + [item.key ~ '-' ~ item.value.0.version ~ '-' ~ item.value.0.release ~ '.' ~ item.value.0.arch] }}"
+      loop: "{{ (ansible_facts.packages | default({})) | dict2items }}"
+      when: item.value.0.arch | default('') is match('i[36]86')
       changed_when: false
-      failed_when: false
       tags: [migration]
 
-    - name: Check chronyd vs ntpd status
-      ansible.builtin.shell: |
-        echo "ntpd:$(systemctl is-active ntpd 2>/dev/null || service ntpd status 2>/dev/null | grep -o 'running\|stopped' | head -1 || echo 'not found')"
-        echo "chronyd:$(systemctl is-active chronyd 2>/dev/null || echo 'not found')"
-      register: disco_time_services
+    - name: Build deprecated package list from package facts
+      ansible.builtin.set_fact:
+        disco_deprecated_packages:
+          stdout_lines: []
       changed_when: false
-      failed_when: false
+      tags: [migration]
+
+    - name: Append deprecated package entries
+      ansible.builtin.set_fact:
+        disco_deprecated_packages:
+          stdout_lines: "{{ disco_deprecated_packages.stdout_lines + [item] }}"
+      loop:
+        - ntp
+        - sendmail
+        - vsftpd
+        - xinetd
+        - talk
+        - ypserv
+        - ypbind
+        - iptables-services
+        - net-tools
+      when: item in (ansible_facts.packages | default({}))
+      changed_when: false
+      tags: [migration]
+
+    - name: Build chronyd vs ntpd status from service facts
+      ansible.builtin.set_fact:
+        disco_time_services:
+          stdout: |
+            ntpd:{{ ansible_facts.services['ntpd.service'].state if 'ntpd.service' in (ansible_facts.services | default({})) else 'not found' }}
+            chronyd:{{ ansible_facts.services['chronyd.service'].state if 'chronyd.service' in (ansible_facts.services | default({})) else 'not found' }}
+      changed_when: false
       tags: [migration]
 
     - name: Check for xinetd services
-      ansible.builtin.shell: |
-        if [ -d /etc/xinetd.d ]; then
-          ls /etc/xinetd.d/ 2>/dev/null
-        else
-          echo "xinetd not present"
-        fi
+      ansible.builtin.find:
+        paths: /etc/xinetd.d
+        file_type: file
+        recurse: false
       register: disco_xinetd
-      changed_when: false
       failed_when: false
       tags: [migration]
 
     - name: Check legacy network config vs NetworkManager
+      ansible.builtin.set_fact:
+        disco_legacy_network:
+          stdout: "ifcfg_count:{{ disco_ifcfg_files.matched | default(0) }},nm_status:{{ disco_nm_active.stdout | default('inactive') }}"
+      changed_when: false
+      failed_when: false
+      tags: [migration]
+
+    - name: Check for NFS/CIFS fstab entries and deprecated mount options
+      # Exact option detection in /etc/fstab requires line-oriented regex parsing.
       ansible.builtin.shell: |
-        count=$(ls /etc/sysconfig/network-scripts/ifcfg-* 2>/dev/null | wc -l)
-        nm_status=$(systemctl is-active NetworkManager 2>/dev/null || echo "inactive")
-        echo "ifcfg_count:${count},nm_status:${nm_status}"
-      register: disco_legacy_network
+        set -o pipefail
+        [ -f /etc/fstab ] || { echo "none found"; exit 0; }
+        grep -E 'nfs|cifs|ext[23]|_netdev' /etc/fstab 2>/dev/null || echo "none found"
+      args:
+        executable: /bin/bash
+      register: disco_fstab_concerns
       changed_when: false
       failed_when: false
       tags: [migration]
@@ -704,13 +862,6 @@
     - name: Get OpenSSL version
       ansible.builtin.command: openssl version
       register: disco_openssl_version
-      changed_when: false
-      failed_when: false
-      tags: [migration]
-
-    - name: Check for NFS/CIFS fstab entries and deprecated mount options
-      ansible.builtin.shell: grep -E 'nfs|cifs|ext[23]|_netdev' /etc/fstab 2>/dev/null || echo "none found"
-      register: disco_fstab_concerns
       changed_when: false
       failed_when: false
       tags: [migration]
@@ -730,9 +881,11 @@
       tags: [migration]
 
     - name: List cron.d entries
-      ansible.builtin.shell: ls -1 /etc/cron.d/ 2>/dev/null
+      ansible.builtin.find:
+        paths: /etc/cron.d
+        file_type: file
+        recurse: false
       register: disco_cron_d
-      changed_when: false
       failed_when: false
       tags: [migration]
 
@@ -740,23 +893,37 @@
     # Common application detection
     # ==========================================================================
 
-    - name: Check for common server applications
-      ansible.builtin.shell: |
-        found=""
-        rpm -q httpd >/dev/null 2>&1 && found="${found}httpd\n"
-        rpm -q nginx >/dev/null 2>&1 && found="${found}nginx\n"
-        rpm -q mysql-server >/dev/null 2>&1 && found="${found}mysql-server\n"
-        rpm -q mariadb-server >/dev/null 2>&1 && found="${found}mariadb-server\n"
-        rpm -q postgresql-server >/dev/null 2>&1 && found="${found}postgresql-server\n"
-        rpm -q oracle-database-preinstall* >/dev/null 2>&1 && found="${found}oracle-preinstall\n"
-        rpm -q tomcat >/dev/null 2>&1 && found="${found}tomcat\n"
-        rpm -q java-*-openjdk >/dev/null 2>&1 && found="${found}$(rpm -q java-*-openjdk 2>/dev/null | head -1)\n"
-        rpm -q docker >/dev/null 2>&1 && found="${found}docker\n"
-        rpm -q podman >/dev/null 2>&1 && found="${found}podman\n"
-        printf "$found"
-      register: disco_common_apps
+    - name: Build common server application list from package facts
+      ansible.builtin.set_fact:
+        disco_common_apps:
+          stdout_lines: []
       changed_when: false
-      failed_when: false
+      tags: [migration]
+
+    - name: Append detected common server applications
+      ansible.builtin.set_fact:
+        disco_common_apps:
+          stdout_lines: "{{ disco_common_apps.stdout_lines + [item] }}"
+      loop:
+        - httpd
+        - nginx
+        - mysql-server
+        - mariadb-server
+        - postgresql-server
+        - tomcat
+        - docker
+        - podman
+      when: item in (ansible_facts.packages | default({}))
+      changed_when: false
+      tags: [migration]
+
+    - name: Append java and oracle preinstall package detections
+      ansible.builtin.set_fact:
+        disco_common_apps:
+          stdout_lines: "{{ disco_common_apps.stdout_lines + ([item] if item not in disco_common_apps.stdout_lines else []) }}"
+      loop: "{{ (ansible_facts.packages | default({})) | dict2items | map(attribute='key') | list }}"
+      when: item is match('^java-.*-openjdk$|^oracle-database-preinstall.*$')
+      changed_when: false
       tags: [migration]
 
 
