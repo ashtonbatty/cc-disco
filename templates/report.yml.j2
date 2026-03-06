@@ -115,7 +115,7 @@
 {{ hv.disco_team_details.stdout | default('not collected') | indent(6, true) }}
     ifcfg_files: |
 {% if hv.disco_ifcfg_files.files | default([]) | length > 0 %}
-{% for file in hv.disco_ifcfg_files.files | default([]) %}
+{% for file in hv.disco_ifcfg_files.files | default([]) | sort(attribute='path') %}
       {{ file.path }}
 {% endfor %}
 {% else %}
@@ -340,13 +340,13 @@
   # ===========================================================================
   directories:
     opt:
-{% for entry in hv.disco_opt_listing.files | default([]) %}
+{% for entry in hv.disco_opt_listing.files | default([]) | sort(attribute='path') %}
       - "{{ entry.path | trim }}"
 {% else %}
       []
 {% endfor %}
     data:
-{% for entry in hv.disco_data_listing.files | default([]) %}
+{% for entry in hv.disco_data_listing.files | default([]) | sort(attribute='path') %}
       - "{{ entry.path | trim }}"
 {% else %}
       []
@@ -377,7 +377,7 @@
 {{ hv.disco_time_services.stdout | default('not collected') | indent(6, true) }}
     xinetd_services: |
 {% if hv.disco_xinetd.files | default([]) | length > 0 %}
-{% for entry in hv.disco_xinetd.files | default([]) %}
+{% for entry in hv.disco_xinetd.files | default([]) | sort(attribute='path') %}
       {{ entry.path | basename }}
 {% endfor %}
 {% else %}
@@ -392,7 +392,7 @@
     system_crontab: |
 {{ (hv.disco_system_crontab.content | default('') | b64decode) | indent(6, true) }}
     cron_d_entries:
-{% for entry in hv.disco_cron_d.files | default([]) %}
+{% for entry in hv.disco_cron_d.files | default([]) | sort(attribute='path') %}
       - "{{ entry.path | basename | trim }}"
 {% else %}
       []

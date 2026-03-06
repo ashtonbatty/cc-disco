@@ -333,12 +333,19 @@
       failed_when: false
       tags: [network]
 
-    - name: Check for network bonding
-      # /proc/net/bonding is kernel-generated and not normalized by Ansible facts.
-      ansible.builtin.shell: ls /proc/net/bonding/ 2>/dev/null
-      register: disco_bond_interfaces
-      changed_when: false
+    - name: Find network bonding interface metadata
+      ansible.builtin.find:
+        paths: /proc/net/bonding
+        file_type: file
+      register: disco_bond_files
       failed_when: false
+      tags: [network]
+
+    - name: Normalize network bonding interface list
+      ansible.builtin.set_fact:
+        disco_bond_interfaces:
+          stdout: "{{ disco_bond_files.files | default([]) | map(attribute='path') | map('basename') | list | join('\n') }}"
+      changed_when: false
       tags: [network]
 
     - name: Get bond details
@@ -347,7 +354,7 @@
       register: disco_bond_details
       changed_when: false
       failed_when: false
-      when: disco_bond_interfaces.stdout | default('') | length > 0
+      when: disco_bond_files.matched | default(0) | int > 0
       tags: [network]
 
     - name: Check for network teaming
@@ -450,15 +457,9 @@
     - name: Build enabled and running service lists from service facts
       ansible.builtin.set_fact:
         disco_systemd_enabled:
-          stdout: |
-            {% for svc_name, svc in (ansible_facts.services | default({})) | dictsort %}
-            {% if svc.status | default('') == 'enabled' %}{{ svc_name }}{% endif %}
-            {% endfor %}
+          stdout: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'defined') | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list | join('\n') }}"
         disco_systemd_running:
-          stdout: |
-            {% for svc_name, svc in (ansible_facts.services | default({})) | dictsort %}
-            {% if svc.state | default('') == 'running' %}{{ svc_name }}{% endif %}
-            {% endfor %}
+          stdout: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'defined') | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list | join('\n') }}"
       tags: [services]
 
     - name: Get chkconfig services (sysvinit)
@@ -561,11 +562,11 @@
     - name: Append non-Red Hat package output lines
       ansible.builtin.set_fact:
         disco_non_rh_packages:
-          stdout_lines: "{{ disco_non_rh_packages.stdout_lines + [item.key ~ '|' ~ (item.value.0.vendor | default('unknown')) ~ '|' ~ (item.value.0.version | default('unknown') ~ '-' ~ item.value.0.release | default('') ~ '.' ~ item.value.0.arch | default('unknown'))] }}"
-      loop: "{{ (ansible_facts.packages | default({})) | dict2items }}"
+          stdout_lines: "{{ disco_non_rh_packages.stdout_lines + [item.0.key ~ '|' ~ (item.1.vendor | default('unknown')) ~ '|' ~ (item.1.version | default('unknown') ~ '-' ~ (item.1.release | default('')) ~ '.' ~ (item.1.arch | default('unknown')))] }}"
+      loop: "{{ query('subelements', (ansible_facts.packages | default({}) | dict2items), 'value', {'skip_missing': True}) }}"
       when:
-        - item.key != 'gpg-pubkey'
-        - (item.value.0.vendor | default('')) is not search('(?i)Red Hat')
+        - item.0.key != 'gpg-pubkey'
+        - (item.1.vendor | default('')) is not search('(?i)Red Hat')
       changed_when: false
       tags: [packages]
 
@@ -789,9 +790,9 @@
     - name: Append 32-bit package entries
       ansible.builtin.set_fact:
         disco_32bit_packages:
-          stdout_lines: "{{ disco_32bit_packages.stdout_lines + [item.key ~ '-' ~ item.value.0.version ~ '-' ~ item.value.0.release ~ '.' ~ item.value.0.arch] }}"
-      loop: "{{ (ansible_facts.packages | default({})) | dict2items }}"
-      when: item.value.0.arch | default('') is match('i[36]86')
+          stdout_lines: "{{ disco_32bit_packages.stdout_lines + [item.0.key ~ '-' ~ item.1.version ~ '-' ~ item.1.release ~ '.' ~ item.1.arch] }}"
+      loop: "{{ query('subelements', (ansible_facts.packages | default({}) | dict2items), 'value', {'skip_missing': True}) }}"
+      when: item.1.arch | default('') is match('i[36]86')
       changed_when: false
       tags: [migration]
 
