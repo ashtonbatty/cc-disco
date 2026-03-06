@@ -141,6 +141,7 @@
         patterns: "*.conf"
       register: disco_sshd_d_files
       failed_when: false
+      when: rhel_major | int >= 8
       tags: [security]
 
     - name: Read sshd_config.d drop-in files
@@ -506,10 +507,10 @@
     - name: Build disk usage summary from mount facts
       ansible.builtin.set_fact:
         disco_df:
-          stdout: |
-            {% for mount in ansible_mounts | default([]) %}
+          stdout: >-
+            {%- for mount in ansible_mounts | default([]) %}
             {{ mount.mount }}|{{ mount.fstype }}|{{ mount.device }}|{{ mount.size_total | default(0) }}|{{ mount.size_available | default(0) }}
-            {% endfor %}
+            {%- endfor %}
       tags: [storage]
 
     - name: Get block devices
@@ -536,10 +537,10 @@
     - name: Get NFS/CIFS mounts from mount facts
       ansible.builtin.set_fact:
         disco_nfs_mounts:
-          stdout: |
-            {% for mount in ansible_mounts | default([]) if mount.fstype in ['nfs', 'nfs4', 'cifs', 'smbfs'] %}
+          stdout: >-
+            {%- for mount in ansible_mounts | default([]) if mount.fstype in ['nfs', 'nfs4', 'cifs', 'smbfs'] %}
             {{ mount.mount }} {{ mount.device }} {{ mount.fstype }} {{ mount.options | default('') }}
-            {% endfor %}
+            {%- endfor %}
       tags: [storage]
 
     # ==========================================================================
@@ -555,19 +556,18 @@
     - name: Build non-Red Hat package list from package facts
       ansible.builtin.set_fact:
         disco_non_rh_packages:
-          stdout_lines: []
-      changed_when: false
-      tags: [packages]
-
-    - name: Append non-Red Hat package output lines
-      ansible.builtin.set_fact:
-        disco_non_rh_packages:
-          stdout_lines: "{{ disco_non_rh_packages.stdout_lines + [item.0.key ~ '|' ~ (item.1.vendor | default('unknown')) ~ '|' ~ (item.1.version | default('unknown') ~ '-' ~ (item.1.release | default('')) ~ '.' ~ (item.1.arch | default('unknown')))] }}"
-      loop: "{{ query('subelements', (ansible_facts.packages | default({}) | dict2items), 'value', {'skip_missing': True}) }}"
-      when:
-        - item.0.key != 'gpg-pubkey'
-        - (item.1.vendor | default('')) is not search('(?i)Red Hat')
-      changed_when: false
+          stdout_lines: >-
+            {%- set result = [] -%}
+            {%- for name, versions in (ansible_facts.packages | default({})).items() -%}
+              {%- if name != 'gpg-pubkey' -%}
+                {%- for v in versions -%}
+                  {%- if (v.vendor | default('')) is not search('(?i)Red Hat') -%}
+                    {%- set _ = result.append(name ~ '|' ~ (v.vendor | default('unknown')) ~ '|' ~ (v.version | default('unknown')) ~ '-' ~ (v.release | default('')) ~ '.' ~ (v.arch | default('unknown'))) -%}
+                  {%- endif -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ result }}
       tags: [packages]
 
     - name: Get yum/dnf versionlocks
@@ -651,7 +651,7 @@
         [ -d /opt/Tanium ] && found="${found}tanium\n"
         [ -d /opt/bacula ] && found="${found}bacula\n"
         [ -d /opt/amanda ] && found="${found}amanda\n"
-        printf "$found"
+        printf '%s' "$found"
       args:
         executable: /bin/bash
       register: disco_backup_monitoring
@@ -729,7 +729,7 @@
       # This is a bespoke directory inventory across multiple optional roots.
       ansible.builtin.shell: |
         set -o pipefail
-        for d in /opt /usr/local/bin /usr/local/sbin /app /apps /software; do
+        for d in /usr/local/bin /usr/local/sbin /app /apps /software; do
           if [ -d "$d" ]; then
             listing=$(ls -1 "$d" 2>/dev/null)
             if [ -n "$listing" ]; then
@@ -783,17 +783,16 @@
     - name: Build 32-bit package list from package facts
       ansible.builtin.set_fact:
         disco_32bit_packages:
-          stdout_lines: []
-      changed_when: false
-      tags: [migration]
-
-    - name: Append 32-bit package entries
-      ansible.builtin.set_fact:
-        disco_32bit_packages:
-          stdout_lines: "{{ disco_32bit_packages.stdout_lines + [item.0.key ~ '-' ~ item.1.version ~ '-' ~ item.1.release ~ '.' ~ item.1.arch] }}"
-      loop: "{{ query('subelements', (ansible_facts.packages | default({}) | dict2items), 'value', {'skip_missing': True}) }}"
-      when: item.1.arch | default('') is match('i[36]86')
-      changed_when: false
+          stdout_lines: >-
+            {%- set result = [] -%}
+            {%- for name, versions in (ansible_facts.packages | default({})).items() -%}
+              {%- for v in versions -%}
+                {%- if (v.arch | default('')) is match('i[36]86') -%}
+                  {%- set _ = result.append(name ~ '-' ~ v.version ~ '-' ~ v.release ~ '.' ~ v.arch) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endfor -%}
+            {{ result }}
       tags: [migration]
 
     - name: Build deprecated package list from package facts
@@ -897,35 +896,20 @@
     - name: Build common server application list from package facts
       ansible.builtin.set_fact:
         disco_common_apps:
-          stdout_lines: []
-      changed_when: false
-      tags: [migration]
-
-    - name: Append detected common server applications
-      ansible.builtin.set_fact:
-        disco_common_apps:
-          stdout_lines: "{{ disco_common_apps.stdout_lines + [item] }}"
-      loop:
-        - httpd
-        - nginx
-        - mysql-server
-        - mariadb-server
-        - postgresql-server
-        - tomcat
-        - docker
-        - podman
-      when: item in (ansible_facts.packages | default({}))
-      changed_when: false
-      tags: [migration]
-
-    - name: Append java and oracle preinstall package detections
-      ansible.builtin.set_fact:
-        disco_common_apps:
-          stdout_lines: "{{ disco_common_apps.stdout_lines + ([item] if item not in disco_common_apps.stdout_lines else []) }}"
-      loop: "{{ (ansible_facts.packages | default({})) | dict2items | map(attribute='key') | list }}"
-      when: item is match('^java-.*-openjdk$|^oracle-database-preinstall.*$')
-      changed_when: false
-      tags: [migration]
+          stdout_lines: >-
+            {%- set result = [] -%}
+            {%- set known_apps = ['httpd', 'nginx', 'mysql-server', 'mariadb-server', 'postgresql-server', 'tomcat', 'docker', 'podman'] -%}
+            {%- set pkgs = ansible_facts.packages | default({}) -%}
+            {%- for app in known_apps -%}
+              {%- if app in pkgs -%}{%- set _ = result.append(app) -%}{%- endif -%}
+            {%- endfor -%}
+            {%- for name in pkgs -%}
+              {%- if name is match('^java-.*-openjdk$|^oracle-database-preinstall.*$') and name not in result -%}
+                {%- set _ = result.append(name) -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ result }}
+      tags: [migration, apps]
 
 
 # ==============================================================================

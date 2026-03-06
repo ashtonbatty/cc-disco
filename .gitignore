@@ -2,6 +2,7 @@
 output/
 
 # Ansible fact cache
+tmp/
 /tmp/ansible_fact_cache/
 
 # Ansible retry files
