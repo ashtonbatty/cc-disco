@@ -114,7 +114,13 @@
     teaming: |
 {{ hv.disco_team_details.stdout | default('not collected') | indent(6, true) }}
     ifcfg_files: |
-{{ hv.disco_ifcfg_files.stdout | default('none') | indent(6, true) }}
+{% if hv.disco_ifcfg_files.files | default([]) | length > 0 %}
+{% for file in hv.disco_ifcfg_files.files | default([]) | sort(attribute='path') %}
+      {{ file.path }}
+{% endfor %}
+{% else %}
+      none
+{% endif %}
 
   # ===========================================================================
   # Firewall
@@ -260,7 +266,7 @@
   # Services
   # ===========================================================================
   services:
-{% if hv.disco_systemd_enabled is defined and hv.disco_systemd_enabled.stdout is defined %}
+{% if hv.disco_init_system.stdout | default('') == 'systemd' %}
     enabled_services: |
 {{ hv.disco_systemd_enabled.stdout | indent(6, true) }}
     running_services: |
@@ -334,14 +340,14 @@
   # ===========================================================================
   directories:
     opt:
-{% for entry in hv.disco_opt_listing.stdout_lines | default([]) %}
-      - "{{ entry | trim }}"
+{% for entry in hv.disco_opt_listing.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | trim }}"
 {% else %}
       []
 {% endfor %}
     data:
-{% for entry in hv.disco_data_listing.stdout_lines | default([]) %}
-      - "{{ entry | trim }}"
+{% for entry in hv.disco_data_listing.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | trim }}"
 {% else %}
       []
 {% endfor %}
@@ -370,7 +376,13 @@
     time_service: |
 {{ hv.disco_time_services.stdout | default('not collected') | indent(6, true) }}
     xinetd_services: |
-{{ hv.disco_xinetd.stdout | default('not present') | indent(6, true) }}
+{% if hv.disco_xinetd.files | default([]) | length > 0 %}
+{% for entry in hv.disco_xinetd.files | default([]) | sort(attribute='path') %}
+      {{ entry.path | basename }}
+{% endfor %}
+{% else %}
+      not present
+{% endif %}
     legacy_network: "{{ hv.disco_legacy_network.stdout | default('not checked') | trim }}"
     openssl_version: "{{ hv.disco_openssl_version.stdout | default('unknown') | trim }}"
     fstab_concerns: |
@@ -380,8 +392,8 @@
     system_crontab: |
 {{ (hv.disco_system_crontab.content | default('') | b64decode) | indent(6, true) }}
     cron_d_entries:
-{% for entry in hv.disco_cron_d.stdout_lines | default([]) %}
-      - "{{ entry | trim }}"
+{% for entry in hv.disco_cron_d.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | basename | trim }}"
 {% else %}
       []
 {% endfor %}
