@@ -8,6 +8,8 @@
 #   ansible-playbook gather_facts.yml
 #   ansible-playbook gather_facts.yml --limit rhel8
 #   ansible-playbook gather_facts.yml --tags selinux,network
+#   ansible-playbook gather_facts.yml -e disco_mode=lightweight
+#   ansible-playbook gather_facts.yml --tags deep_kernel
 #
 # Output: ./output/discovery_report.yml
 
@@ -18,6 +20,11 @@
 
   vars:
     rhel_major: "{{ ansible_distribution_major_version }}"
+    discovery_mode: "{{ disco_mode | default('full') }}"
+    collect_deep_kernel: "{{ disco_collect_deep_kernel | default(discovery_mode != 'lightweight') | bool }}"
+    collect_deep_filesystem: "{{ disco_collect_deep_filesystem | default(discovery_mode != 'lightweight') | bool }}"
+    collect_deep_security: "{{ disco_collect_deep_security | default(discovery_mode != 'lightweight') | bool }}"
+    collect_command_heavy_probes: "{{ disco_collect_command_heavy_probes | default(discovery_mode != 'lightweight') | bool }}"
 
   tasks:
 
@@ -106,7 +113,8 @@
         file_type: file
       register: disco_sudoers_d_files
       failed_when: false
-      tags: [security]
+      when: collect_deep_security
+      tags: [security, deep_security]
 
     - name: Read each sudoers.d file
       ansible.builtin.slurp:
@@ -114,7 +122,8 @@
       loop: "{{ disco_sudoers_d_files.files | default([]) }}"
       register: disco_sudoers_d_contents
       failed_when: false
-      tags: [security]
+      when: collect_deep_security
+      tags: [security, deep_security]
 
     - name: Get sshd_config
       ansible.builtin.slurp:
@@ -130,7 +139,8 @@
         patterns: "*.conf"
       register: disco_sshd_d_files
       failed_when: false
-      tags: [security]
+      when: collect_deep_security
+      tags: [security, deep_security]
 
     - name: Read sshd_config.d drop-in files
       ansible.builtin.slurp:
@@ -138,7 +148,8 @@
       loop: "{{ disco_sshd_d_files.files | default([]) }}"
       register: disco_sshd_d_contents
       failed_when: false
-      tags: [security]
+      when: collect_deep_security
+      tags: [security, deep_security]
 
     - name: Read key PAM configs
       ansible.builtin.slurp:
@@ -150,7 +161,8 @@
         - /etc/pam.d/su
       register: disco_pam_contents
       failed_when: false
-      tags: [security]
+      when: collect_deep_security
+      tags: [security, deep_security]
 
     - name: Get crypto policies (RHEL 8+)
       ansible.builtin.command: update-crypto-policies --show
@@ -234,7 +246,8 @@
       register: disco_third_party_modules
       changed_when: false
       failed_when: false
-      tags: [kernel]
+      when: collect_deep_kernel and collect_command_heavy_probes
+      tags: [kernel, deep_kernel]
 
     - name: Get date of last kernel update
       ansible.builtin.shell: rpm -q --last kernel | head -1
@@ -269,7 +282,8 @@
       register: disco_deprecated_modules
       changed_when: false
       failed_when: false
-      tags: [kernel]
+      when: collect_deep_kernel
+      tags: [kernel, deep_kernel]
 
     # ==========================================================================
     # Networking
@@ -504,6 +518,7 @@
       register: disco_non_rh_packages
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [packages]
 
     - name: Get yum/dnf versionlocks
@@ -573,6 +588,7 @@
       register: disco_backup_monitoring
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [backup]
 
     # ==========================================================================
@@ -616,14 +632,16 @@
       register: disco_opt_listing
       changed_when: false
       failed_when: false
-      tags: [filesystem]
+      when: collect_deep_filesystem
+      tags: [filesystem, deep_filesystem]
 
     - name: List /data subdirectories
       ansible.builtin.shell: ls -1d /data/*/ 2>/dev/null || echo "empty or does not exist"
       register: disco_data_listing
       changed_when: false
       failed_when: false
-      tags: [filesystem]
+      when: collect_deep_filesystem
+      tags: [filesystem, deep_filesystem]
 
     - name: Check third-party software in common paths
       ansible.builtin.shell: |
@@ -639,7 +657,8 @@
       register: disco_third_party_paths
       changed_when: false
       failed_when: false
-      tags: [filesystem]
+      when: collect_deep_filesystem and collect_command_heavy_probes
+      tags: [filesystem, deep_filesystem]
 
     # ==========================================================================
     # RHEL 9/10 Migration Readiness
@@ -654,6 +673,7 @@
       register: disco_python_versions
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Get 32-bit packages
@@ -661,6 +681,7 @@
       register: disco_32bit_packages
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Check for deprecated packages
@@ -668,6 +689,7 @@
       register: disco_deprecated_packages
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Check chronyd vs ntpd status
@@ -677,6 +699,7 @@
       register: disco_time_services
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Check for xinetd services
@@ -689,6 +712,7 @@
       register: disco_xinetd
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Check legacy network config vs NetworkManager
@@ -699,6 +723,7 @@
       register: disco_legacy_network
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Get OpenSSL version
@@ -706,6 +731,7 @@
       register: disco_openssl_version
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Check for NFS/CIFS fstab entries and deprecated mount options
@@ -713,6 +739,7 @@
       register: disco_fstab_concerns
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Get root crontab
@@ -720,6 +747,7 @@
       register: disco_root_crontab
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: Get system crontab
@@ -727,6 +755,7 @@
         src: /etc/crontab
       register: disco_system_crontab
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     - name: List cron.d entries
@@ -734,6 +763,7 @@
       register: disco_cron_d
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
     # ==========================================================================
@@ -757,6 +787,7 @@
       register: disco_common_apps
       changed_when: false
       failed_when: false
+      when: collect_command_heavy_probes
       tags: [migration]
 
 

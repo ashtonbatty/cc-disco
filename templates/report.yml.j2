@@ -8,6 +8,29 @@
 {% if hv.ansible_hostname is defined %}
 {{ host }}:
 
+  discovery_controls:
+    mode: "{{ hv.discovery_mode | default('full') }}"
+    collect_deep_security: {{ hv.collect_deep_security | default(true) | bool }}
+    collect_deep_kernel: {{ hv.collect_deep_kernel | default(true) | bool }}
+    collect_deep_filesystem: {{ hv.collect_deep_filesystem | default(true) | bool }}
+    collect_command_heavy_probes: {{ hv.collect_command_heavy_probes | default(true) | bool }}
+    omitted_sections:
+{% if not (hv.collect_deep_security | default(true) | bool) %}
+      - deep_security (intentionally skipped)
+{% endif %}
+{% if not (hv.collect_deep_kernel | default(true) | bool) %}
+      - deep_kernel (intentionally skipped)
+{% endif %}
+{% if not (hv.collect_deep_filesystem | default(true) | bool) %}
+      - deep_filesystem (intentionally skipped)
+{% endif %}
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - command_heavy_probes (intentionally skipped)
+{% endif %}
+{% if (hv.collect_deep_security | default(true) | bool) and (hv.collect_deep_kernel | default(true) | bool) and (hv.collect_deep_filesystem | default(true) | bool) and (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - none
+{% endif %}
+
   # ===========================================================================
   # System
   # ===========================================================================
@@ -181,7 +204,11 @@
   security:
     sudoers_main: |
 {{ (hv.disco_sudoers_main.content | default('') | b64decode) | indent(6, true) }}
+    deep_security_status: "{{ 'intentionally skipped (collect_deep_security=false)' if not (hv.collect_deep_security | default(true) | bool) else 'collected' }}"
     sudoers_drop_ins:
+{% if not (hv.collect_deep_security | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for item in hv.disco_sudoers_d_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item.path | default('unknown') }}"
@@ -191,10 +218,13 @@
 {% else %}
       []
 {% endfor %}
+{% endif %}
     sshd_config: |
 {{ (hv.disco_sshd_config.content | default('') | b64decode) | indent(6, true) }}
-{% if hv.disco_sshd_d_contents is defined %}
     sshd_config_drop_ins:
+{% if not (hv.collect_deep_security | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for item in hv.disco_sshd_d_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item.path | default('unknown') }}"
@@ -206,6 +236,11 @@
 {% endfor %}
 {% endif %}
     pam:
+{% if not (hv.collect_deep_security | default(true) | bool) %}
+      - file: "deep_security"
+        content: |
+          intentionally skipped
+{% else %}
 {% for item in hv.disco_pam_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item }}"
@@ -215,6 +250,7 @@
 {% else %}
       []
 {% endfor %}
+{% endif %}
     crypto_policy: "{{ hv.disco_crypto_policy.stdout | default('N/A (pre-RHEL 8)') | trim }}"
 
   # ===========================================================================
@@ -237,7 +273,13 @@
   kernel:
     loaded_modules: |
 {{ hv.disco_lsmod.stdout | default('not collected') | indent(6, true) }}
+    deep_kernel_status: "{{ 'intentionally skipped (collect_deep_kernel=false)' if not (hv.collect_deep_kernel | default(true) | bool) else 'collected' }}"
     third_party_modules:
+{% if not (hv.collect_deep_kernel | default(true) | bool) or not (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - module: "intentionally skipped"
+        filename: "N/A"
+        author: "N/A"
+{% else %}
 {% for line in hv.disco_third_party_modules.stdout_lines | default([]) %}
 {% set parts = line.split('|') %}
       - module: "{{ parts[0] | default('unknown') }}"
@@ -246,12 +288,17 @@
 {% else %}
       []
 {% endfor %}
+{% endif %}
     deprecated_modules:
+{% if not (hv.collect_deep_kernel | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for line in hv.disco_deprecated_modules.stdout_lines | default([]) %}
       - "{{ line.split(':')[1] | default(line) }}"
 {% else %}
       []
 {% endfor %}
+{% endif %}
     last_kernel_update: "{{ hv.disco_last_kernel_update.stdout | default('unknown') | trim }}"
     grub_defaults: |
 {{ (hv.disco_grub_defaults.content | default('') | b64decode) | indent(6, true) }}
@@ -279,6 +326,11 @@
   packages:
     total_count: {{ hv.disco_pkg_count.stdout | default(0) | trim }}
     non_redhat_packages:
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - name: "intentionally skipped"
+        vendor: "N/A"
+        version: "N/A"
+{% else %}
 {% for line in hv.disco_non_rh_packages.stdout_lines | default([]) %}
 {% set parts = line.split('|') %}
       - name: "{{ parts[0] | default('unknown') }}"
@@ -287,6 +339,7 @@
 {% else %}
       []
 {% endfor %}
+{% endif %}
     versionlocks: |
 {{ hv.disco_versionlocks.stdout | default('none') | indent(6, true) }}
     enabled_repos: |
@@ -309,6 +362,9 @@
   # Backup and Monitoring Agents
   # ===========================================================================
   agents_detected:
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+    - "intentionally skipped (collect_command_heavy_probes=false)"
+{% else %}
 {% for agent in hv.disco_backup_monitoring.stdout_lines | default([]) %}
 {% if agent | trim | length > 0 %}
     - "{{ agent | trim }}"
@@ -316,11 +372,15 @@
 {% else %}
     []
 {% endfor %}
+{% endif %}
 
   # ===========================================================================
   # Common Applications
   # ===========================================================================
   common_apps:
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+    - "intentionally skipped (collect_command_heavy_probes=false)"
+{% else %}
 {% for app in hv.disco_common_apps.stdout_lines | default([]) %}
 {% if app | trim | length > 0 %}
     - "{{ app | trim }}"
@@ -328,33 +388,43 @@
 {% else %}
     []
 {% endfor %}
+{% endif %}
 
   # ===========================================================================
   # Filesystem Exploration
   # ===========================================================================
   directories:
+    deep_filesystem_status: "{{ 'intentionally skipped (collect_deep_filesystem=false)' if not (hv.collect_deep_filesystem | default(true) | bool) else 'collected' }}"
     opt:
+{% if not (hv.collect_deep_filesystem | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for entry in hv.disco_opt_listing.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
 {% else %}
       []
 {% endfor %}
+{% endif %}
     data:
+{% if not (hv.collect_deep_filesystem | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for entry in hv.disco_data_listing.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
 {% else %}
       []
 {% endfor %}
+{% endif %}
     third_party_paths: |
-{{ hv.disco_third_party_paths.stdout | default('not collected') | indent(6, true) }}
+{{ hv.disco_third_party_paths.stdout | default('intentionally skipped (collect_deep_filesystem=false or collect_command_heavy_probes=false)') | indent(6, true) }}
 
   # ===========================================================================
   # RHEL 9/10 Migration Readiness
   # ===========================================================================
   migration:
     python_versions: |
-{{ hv.disco_python_versions.stdout | default('not collected') | indent(6, true) }}
-    packages_32bit_count: {{ (hv.disco_32bit_packages.stdout_lines | default([])) | length }}
+{{ hv.disco_python_versions.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
+    packages_32bit_count: {{ (hv.disco_32bit_packages.stdout_lines | default([])) | length if (hv.collect_command_heavy_probes | default(true) | bool) else 0 }}
 {% if (hv.disco_32bit_packages.stdout_lines | default([])) | length > 0 %}
     packages_32bit:
 {% for pkg in hv.disco_32bit_packages.stdout_lines | default([]) %}
@@ -362,29 +432,37 @@
 {% endfor %}
 {% endif %}
     deprecated_packages:
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for pkg in hv.disco_deprecated_packages.stdout_lines | default([]) %}
       - "{{ pkg }}"
 {% else %}
       []
 {% endfor %}
+{% endif %}
     time_service: |
-{{ hv.disco_time_services.stdout | default('not collected') | indent(6, true) }}
+{{ hv.disco_time_services.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
     xinetd_services: |
-{{ hv.disco_xinetd.stdout | default('not present') | indent(6, true) }}
-    legacy_network: "{{ hv.disco_legacy_network.stdout | default('not checked') | trim }}"
-    openssl_version: "{{ hv.disco_openssl_version.stdout | default('unknown') | trim }}"
+{{ hv.disco_xinetd.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
+    legacy_network: "{{ hv.disco_legacy_network.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | trim }}"
+    openssl_version: "{{ hv.disco_openssl_version.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | trim }}"
     fstab_concerns: |
-{{ hv.disco_fstab_concerns.stdout | default('none') | indent(6, true) }}
+{{ hv.disco_fstab_concerns.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
     root_crontab: |
-{{ hv.disco_root_crontab.stdout | default('no crontab') | indent(6, true) }}
+{{ hv.disco_root_crontab.stdout | default('intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
     system_crontab: |
-{{ (hv.disco_system_crontab.content | default('') | b64decode) | indent(6, true) }}
+{{ ((hv.disco_system_crontab.content | default('') | b64decode) if (hv.collect_command_heavy_probes | default(true) | bool) else 'intentionally skipped (collect_command_heavy_probes=false)') | indent(6, true) }}
     cron_d_entries:
+{% if not (hv.collect_command_heavy_probes | default(true) | bool) %}
+      - "intentionally skipped"
+{% else %}
 {% for entry in hv.disco_cron_d.stdout_lines | default([]) %}
       - "{{ entry | trim }}"
 {% else %}
       []
 {% endfor %}
+{% endif %}
 
 {% endif %}
 {% endfor %}
