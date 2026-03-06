@@ -113,7 +113,7 @@
         file_type: file
       register: disco_sudoers_d_files
       failed_when: false
-      when: collect_deep_security
+      when: collect_deep_security | bool
       tags: [security, deep_security]
 
     - name: Read each sudoers.d file
@@ -122,7 +122,7 @@
       loop: "{{ disco_sudoers_d_files.files | default([]) }}"
       register: disco_sudoers_d_contents
       failed_when: false
-      when: collect_deep_security
+      when: collect_deep_security | bool
       tags: [security, deep_security]
 
     - name: Get sshd_config
@@ -139,7 +139,7 @@
         patterns: "*.conf"
       register: disco_sshd_d_files
       failed_when: false
-      when: collect_deep_security
+      when: collect_deep_security | bool
       tags: [security, deep_security]
 
     - name: Read sshd_config.d drop-in files
@@ -148,7 +148,7 @@
       loop: "{{ disco_sshd_d_files.files | default([]) }}"
       register: disco_sshd_d_contents
       failed_when: false
-      when: collect_deep_security
+      when: collect_deep_security | bool
       tags: [security, deep_security]
 
     - name: Read key PAM configs
@@ -161,7 +161,7 @@
         - /etc/pam.d/su
       register: disco_pam_contents
       failed_when: false
-      when: collect_deep_security
+      when: collect_deep_security | bool
       tags: [security, deep_security]
 
     - name: Get crypto policies (RHEL 8+)
@@ -246,7 +246,7 @@
       register: disco_third_party_modules
       changed_when: false
       failed_when: false
-      when: collect_deep_kernel and collect_command_heavy_probes
+      when: (collect_deep_kernel | bool) and (collect_command_heavy_probes | bool)
       tags: [kernel, deep_kernel]
 
     - name: Get date of last kernel update
@@ -282,7 +282,7 @@
       register: disco_deprecated_modules
       changed_when: false
       failed_when: false
-      when: collect_deep_kernel
+      when: collect_deep_kernel | bool
       tags: [kernel, deep_kernel]
 
     # ==========================================================================
@@ -518,7 +518,7 @@
       register: disco_non_rh_packages
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [packages]
 
     - name: Get yum/dnf versionlocks
@@ -588,7 +588,7 @@
       register: disco_backup_monitoring
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [backup]
 
     # ==========================================================================
@@ -632,7 +632,7 @@
       register: disco_opt_listing
       changed_when: false
       failed_when: false
-      when: collect_deep_filesystem
+      when: collect_deep_filesystem | bool
       tags: [filesystem, deep_filesystem]
 
     - name: List /data subdirectories
@@ -640,7 +640,7 @@
       register: disco_data_listing
       changed_when: false
       failed_when: false
-      when: collect_deep_filesystem
+      when: collect_deep_filesystem | bool
       tags: [filesystem, deep_filesystem]
 
     - name: Check third-party software in common paths
@@ -657,7 +657,7 @@
       register: disco_third_party_paths
       changed_when: false
       failed_when: false
-      when: collect_deep_filesystem and collect_command_heavy_probes
+      when: (collect_deep_filesystem | bool) and (collect_command_heavy_probes | bool)
       tags: [filesystem, deep_filesystem]
 
     # ==========================================================================
@@ -673,7 +673,7 @@
       register: disco_python_versions
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Get 32-bit packages
@@ -681,7 +681,7 @@
       register: disco_32bit_packages
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Check for deprecated packages
@@ -689,7 +689,7 @@
       register: disco_deprecated_packages
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Check chronyd vs ntpd status
@@ -699,7 +699,7 @@
       register: disco_time_services
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Check for xinetd services
@@ -712,7 +712,7 @@
       register: disco_xinetd
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Check legacy network config vs NetworkManager
@@ -723,7 +723,7 @@
       register: disco_legacy_network
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Get OpenSSL version
@@ -731,7 +731,7 @@
       register: disco_openssl_version
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Check for NFS/CIFS fstab entries and deprecated mount options
@@ -739,7 +739,7 @@
       register: disco_fstab_concerns
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Get root crontab
@@ -747,7 +747,7 @@
       register: disco_root_crontab
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: Get system crontab
@@ -755,7 +755,7 @@
         src: /etc/crontab
       register: disco_system_crontab
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     - name: List cron.d entries
@@ -763,7 +763,7 @@
       register: disco_cron_d
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
     # ==========================================================================
@@ -787,7 +787,7 @@
       register: disco_common_apps
       changed_when: false
       failed_when: false
-      when: collect_command_heavy_probes
+      when: collect_command_heavy_probes | bool
       tags: [migration]
 
 
