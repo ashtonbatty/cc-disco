@@ -406,7 +406,7 @@
       register: disco_firewalld_zones
       changed_when: false
       failed_when: false
-      when: disco_firewalld_active.stdout | default('') == 'active'
+      when: disco_firewalld_active.stdout | default('') | trim | lower == 'active'
       tags: [firewall]
 
     - name: Check if iptables service is active
