@@ -1,9 +1,9 @@
 ---
 # RHEL Server Discovery Report
 # Generated: {{ ansible_date_time.iso8601 }}
-# Total hosts scanned: {{ groups['all'] | difference(['localhost']) | length }}
+# Total hosts scanned: {{ report_hosts | default(groups['all'] | difference(['localhost'])) | length }}
 
-{% for host in groups['all'] | difference(['localhost']) | sort %}
+{% for host in (report_hosts | default(groups['all'] | difference(['localhost']))) | sort %}
 {% set hv = hostvars[host] %}
 {% if hv.ansible_hostname is defined %}
 {{ host }}:

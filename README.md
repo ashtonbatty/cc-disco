@@ -97,6 +97,9 @@ ansible-playbook gather_facts.yml
 ansible-playbook gather_facts.yml --limit rhel8
 ansible-playbook gather_facts.yml --limit server1.example.com
 
+# Report generation still runs during --limit executions; no need to include localhost in --limit
+ansible-playbook gather_facts.yml --limit rhel8
+
 # Run specific sections only
 ansible-playbook gather_facts.yml --tags selinux,network,migration
 ```

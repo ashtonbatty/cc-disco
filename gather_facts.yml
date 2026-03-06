@@ -765,9 +765,8 @@
 # ==============================================================================
 
 - name: Generate discovery report
-  hosts: localhost
-  gather_facts: true
-  connection: local
+  hosts: all
+  gather_facts: false
 
   vars:
     output_dir: "./output"
@@ -776,17 +775,25 @@
   tasks:
 
     - name: Ensure output directory exists
+      run_once: true
+      delegate_to: localhost
       ansible.builtin.file:
         path: "{{ output_dir }}"
         state: directory
         mode: "0755"
 
     - name: Render consolidated discovery report
+      run_once: true
+      delegate_to: localhost
       ansible.builtin.template:
         src: templates/report.yml.j2
         dest: "{{ report_file }}"
         mode: "0644"
+      vars:
+        report_hosts: "{{ ansible_play_hosts_all | difference(['localhost']) }}"
 
     - name: Report location
+      run_once: true
+      delegate_to: localhost
       ansible.builtin.debug:
         msg: "Discovery report written to {{ report_file }}"
