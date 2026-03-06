@@ -1,6 +1,6 @@
 ---
 # RHEL Server Discovery Report
-# Generated: {{ ansible_date_time.iso8601 }}
+# Generated: {{ hostvars[(report_hosts | default(groups['all'] | difference(['localhost'])))[0]].ansible_date_time.iso8601 | default('unknown') }}
 # Total hosts scanned: {{ report_hosts | default(groups['all'] | difference(['localhost'])) | length }}
 
 {% for host in (report_hosts | default(groups['all'] | difference(['localhost']))) | sort %}
@@ -90,7 +90,7 @@
 {% endfor %}
     interfaces:
 {% for iface in hv.ansible_interfaces | default([]) | sort %}
-{% set iface_key = 'ansible_' + iface | replace('-', '_') %}
+{% set iface_key = 'ansible_' + iface | replace('-', '_') | replace('.', '_') %}
 {% set iface_data = hv[iface_key] | default({}) %}
       - name: "{{ iface }}"
         ipv4: "{{ iface_data.ipv4.address | default('none') if iface_data.ipv4 is defined else 'none' }}"
@@ -268,7 +268,7 @@
   services:
 {% if hv.disco_init_system.stdout | default('') == 'systemd' %}
     enabled_services: |
-{{ hv.disco_systemd_enabled.stdout | indent(6, true) }}
+{{ hv.disco_systemd_enabled.stdout | default('') | indent(6, true) }}
     running_services: |
 {{ hv.disco_systemd_running.stdout | default('') | indent(6, true) }}
 {% elif hv.disco_chkconfig is defined and hv.disco_chkconfig.stdout is defined %}
