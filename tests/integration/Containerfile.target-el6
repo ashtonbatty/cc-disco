@@ -1,0 +1,40 @@
+FROM centos:6
+
+# CentOS 6 repos are archived — point to vault
+RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo && \
+    sed -i 's|^#\s*baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+
+# Install sshd and basic tools
+RUN yum install -y openssh-server sudo python && \
+    yum clean all
+
+# Create ansible user with sudo
+RUN useradd -m ansible && \
+    echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible && \
+    chmod 0440 /etc/sudoers.d/ansible
+
+# Generate SSH host keys
+RUN ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" && \
+    ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ""
+
+# Configure sshd
+RUN sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config && \
+    # pam_loginuid fails in containers — make it optional
+    sed -i 's/^\(session.*pam_loginuid.so\)$/session optional pam_loginuid.so/' /etc/pam.d/sshd
+
+# Install SSH public key
+RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh
+COPY tests/integration/ssh-keys/id_rsa.pub /home/ansible/.ssh/authorized_keys
+RUN chmod 600 /home/ansible/.ssh/authorized_keys && \
+    chown -R ansible:ansible /home/ansible/.ssh
+
+# Provision script (scenario-specific config)
+COPY tests/integration/scenarios/el6-legacy/provision.sh /tmp/provision.sh
+COPY tests/integration/scenarios/el6-legacy/files/ /tmp/provision-files/
+RUN chmod +x /tmp/provision.sh && /tmp/provision.sh
+
+# CentOS 6 uses sysvinit — run sshd in foreground
+CMD ["/usr/sbin/sshd", "-D"]

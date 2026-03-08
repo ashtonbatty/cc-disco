@@ -1,0 +1,4 @@
+/dev/mapper/centos-root /                       xfs     defaults        0 0
+UUID=abc12345-dead-beef-cafe-123456789abc /boot   xfs     defaults        0 0
+/dev/mapper/centos-swap swap                    swap    defaults        0 0
+nfs-server:/exports/data /mnt/nfs                nfs     defaults        0 0

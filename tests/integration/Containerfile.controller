@@ -1,0 +1,38 @@
+FROM quay.io/centos/centos:stream8
+
+# CentOS Stream 8 is EOL — point to vault
+RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Stream-*.repo 2>/dev/null || true && \
+    sed -i 's|^#\s*baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Stream-*.repo 2>/dev/null || true
+
+# Install Python 3 and pip
+RUN yum install -y python3 python3-pip openssh-clients sshpass && \
+    yum clean all
+
+# Upgrade pip, then install ansible-core 2.11 (last version supporting Python 2.6 on managed nodes)
+RUN pip3 install --no-cache-dir --upgrade pip setuptools && \
+    pip3 install --no-cache-dir 'ansible-core>=2.11,<2.12' pyyaml
+
+# Create ansible user
+RUN useradd -m ansible
+USER ansible
+WORKDIR /home/ansible
+
+# Copy SSH private key
+RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh
+COPY --chown=ansible:ansible tests/integration/ssh-keys/id_rsa /home/ansible/.ssh/id_rsa
+RUN chmod 600 /home/ansible/.ssh/id_rsa
+
+# Disable strict host key checking for test containers
+RUN echo -e "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null" \
+    > /home/ansible/.ssh/config && chmod 600 /home/ansible/.ssh/config
+
+# Copy playbook (full project tree)
+COPY --chown=ansible:ansible . /home/ansible/playbook/
+WORKDIR /home/ansible/playbook
+
+# Override inventory with test inventory
+COPY --chown=ansible:ansible tests/integration/inventory/hosts.yml /home/ansible/playbook/inventory/hosts.yml
+COPY --chown=ansible:ansible tests/integration/validate.py /home/ansible/playbook/validate.py
+COPY --chown=ansible:ansible tests/integration/entrypoint.sh /home/ansible/playbook/entrypoint.sh
+
+ENTRYPOINT ["/bin/bash", "/home/ansible/playbook/entrypoint.sh"]

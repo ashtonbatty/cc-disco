@@ -1,0 +1,51 @@
+---
+services:
+
+  el7-webserver:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-el7
+      args:
+        SCENARIO: el7-webserver
+    hostname: el7-webserver
+    networks:
+      - disco-test
+
+  el7-minimal:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-el7
+      args:
+        SCENARIO: el7-minimal
+    hostname: el7-minimal
+    networks:
+      - disco-test
+
+  el6-legacy:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-el6
+    hostname: el6-legacy
+    networks:
+      - disco-test
+
+  controller:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.controller
+    hostname: controller
+    depends_on:
+      - el7-webserver
+      - el7-minimal
+      - el6-legacy
+    volumes:
+      - report-output:/home/ansible/playbook/output
+    networks:
+      - disco-test
+
+volumes:
+  report-output:
+
+networks:
+  disco-test:
+    driver: bridge
