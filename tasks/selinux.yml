@@ -1,0 +1,16 @@
+---
+# SELinux
+
+- name: Get SELinux status
+  ansible.builtin.command: sestatus
+  register: disco_selinux_status
+  changed_when: false
+  failed_when: false
+  tags: [selinux]
+
+- name: Get SELinux config file
+  ansible.builtin.slurp:
+    src: /etc/selinux/config
+  register: disco_selinux_config
+  failed_when: false
+  tags: [selinux]

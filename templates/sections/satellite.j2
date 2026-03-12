@@ -1,0 +1,22 @@
+  # ===========================================================================
+  # Satellite / Subscription
+  # ===========================================================================
+  satellite:
+{% set _sub_id = hv.disco_sub_identity.stdout | default('') | trim %}
+{% if _sub_id | length > 0 %}
+    subscription_identity: |
+{{ _sub_id | indent(6, true) }}
+{% else %}
+    subscription_identity: null
+{% endif %}
+{% set _sub_status = hv.disco_sub_status.stdout | default('') | trim %}
+{% if _sub_status | length > 0 %}
+    subscription_status: |
+{{ _sub_status | indent(6, true) }}
+{% else %}
+    subscription_status: null
+{% endif %}
+{% set _sat_server = hv.disco_satellite_server.stdout | default('') | trim %}
+    satellite_server: {{ _sat_server | to_json if _sat_server | length > 0 else 'null' }}
+{% set _katello = hv.disco_katello_info.stdout | default('') | trim %}
+    katello_packages: {{ _katello | to_json if _katello | length > 0 else 'null' }}

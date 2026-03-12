@@ -1,0 +1,23 @@
+  # ===========================================================================
+  # Filesystem Exploration
+  # ===========================================================================
+  directories:
+    opt:
+{% for entry in hv.disco_opt_listing.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | trim }}"
+{% else %}
+      []
+{% endfor %}
+    data:
+{% for entry in hv.disco_data_listing.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | trim }}"
+{% else %}
+      []
+{% endfor %}
+{% set _thirdparty = hv.disco_third_party_paths.stdout | default('') | trim %}
+{% if _thirdparty | length > 0 %}
+    third_party_paths: |
+{{ _thirdparty | indent(6, true) }}
+{% else %}
+    third_party_paths: null
+{% endif %}

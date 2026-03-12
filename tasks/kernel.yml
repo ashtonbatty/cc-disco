@@ -1,0 +1,70 @@
+---
+# Kernel, Modules, Boot
+
+- name: Get loaded kernel modules
+  ansible.builtin.command: lsmod
+  register: disco_lsmod
+  changed_when: false
+  failed_when: false
+  tags: [kernel]
+
+- name: Detect third-party kernel modules
+  # Module author/filepath correlation is not exposed by Ansible facts.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for mod in $(lsmod | awk 'NR>1{print $1}'); do
+      info=$(modinfo "$mod" 2>/dev/null)
+      filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
+      if echo "$filename" | grep -qv '/kernel/'; then
+        author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
+        echo "${mod}|${filename}|${author}"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: disco_third_party_modules
+  changed_when: false
+  failed_when: false
+  tags: [kernel]
+
+- name: Get date of last kernel update
+  # Package install chronology for kernel NEVRAs is only available via rpm query output.
+  ansible.builtin.shell: set -o pipefail && rpm -q --last kernel | head -1  # noqa command-instead-of-module
+  args:
+    executable: /bin/bash
+  register: disco_last_kernel_update
+  changed_when: false
+  failed_when: false
+  tags: [kernel]
+
+- name: Check boot mode (UEFI vs BIOS)
+  ansible.builtin.stat:
+    path: /sys/firmware/efi
+  register: disco_efi_dir
+  failed_when: false
+  tags: [kernel]
+
+- name: Get GRUB defaults
+  ansible.builtin.slurp:
+    src: /etc/default/grub
+  register: disco_grub_defaults
+  failed_when: false
+  tags: [kernel]
+
+- name: Check for deprecated kernel modules
+  # Deprecated module detection requires policy matching against loaded module names.
+  ansible.builtin.shell: |
+    set -o pipefail
+    lsmod | awk 'NR>1{print $1}' | while read mod; do
+      case "$mod" in
+        floppy|mptbase|mptscsih|mptspi|megaraid|aacraid|3w-9xxx|3w-sas)
+          echo "deprecated:$mod"
+          ;;
+      esac
+    done
+  args:
+    executable: /bin/bash
+  register: disco_deprecated_modules
+  changed_when: false
+  failed_when: false
+  tags: [kernel]

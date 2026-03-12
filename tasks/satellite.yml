@@ -1,0 +1,42 @@
+---
+# Satellite / Subscription
+
+- name: Get subscription-manager identity
+  ansible.builtin.command: subscription-manager identity
+  register: disco_sub_identity
+  changed_when: false
+  failed_when: false
+  tags: [satellite]
+
+- name: Get subscription-manager status
+  ansible.builtin.command: subscription-manager status
+  register: disco_sub_status
+  changed_when: false
+  failed_when: false
+  tags: [satellite]
+
+- name: Get Satellite server from rhsm.conf
+  # Extracting specific rhsm.conf keys is easiest via targeted regex parse.
+  ansible.builtin.shell: |
+    set -o pipefail
+    [ -f /etc/rhsm/rhsm.conf ] || { echo "rhsm.conf missing"; exit 0; }
+    grep -E '^\s*(hostname|baseurl)' /etc/rhsm/rhsm.conf 2>/dev/null || echo "none"
+  args:
+    executable: /bin/bash
+  register: disco_satellite_server
+  changed_when: false
+  failed_when: false
+  tags: [satellite]
+
+- name: Get katello/satellite packages
+  # Pattern-based package name matching uses rpm query text.
+  ansible.builtin.shell: |
+    set -o pipefail
+    command -v rpm >/dev/null 2>&1 || { echo "rpm not found"; exit 0; }
+    rpm -qa | grep -iE 'katello|satellite|gofer' || echo "none"
+  args:
+    executable: /bin/bash
+  register: disco_katello_info
+  changed_when: false
+  failed_when: false
+  tags: [satellite]

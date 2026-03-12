@@ -1,0 +1,9 @@
+---
+# System Identity
+
+- name: Get RHEL release file
+  ansible.builtin.slurp:
+    src: /etc/redhat-release
+  register: disco_redhat_release
+  failed_when: false
+  tags: [system]

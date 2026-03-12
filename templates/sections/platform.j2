@@ -1,0 +1,30 @@
+  # ===========================================================================
+  # Platform
+  # ===========================================================================
+  platform:
+{% set _dmi_vendor = (hv.disco_dmi_vendor.content | default('') | b64decode) | trim %}
+{% set _dmi_product = (hv.disco_dmi_product.content | default('') | b64decode) | trim %}
+    dmi_vendor: {{ _dmi_vendor | to_json if _dmi_vendor | length > 0 else 'null' }}
+    dmi_product: {{ _dmi_product | to_json if _dmi_product | length > 0 else 'null' }}
+{% set _virt_type = hv.disco_virt_type.stdout | default('') | trim %}
+{% set _virt_what = hv.disco_virt_what.stdout | default('') | trim %}
+    virt_type: {{ _virt_type | to_json if _virt_type | length > 0 else 'null' }}
+    virt_what: {{ _virt_what | to_json if _virt_what | length > 0 else 'null' }}
+{% if hv.disco_ec2_check.status | default(0) | int == 200 %}
+    detected_platform: "aws_ec2"
+{% elif hv.disco_azure_check.status | default(0) | int == 200 %}
+    detected_platform: "azure_vm"
+{% elif 'VMware' in _dmi_vendor %}
+    detected_platform: "vmware"
+{% elif _virt_what == '' and (_virt_type == 'none' or _virt_type == '') %}
+    detected_platform: "bare_metal"
+{% elif _virt_type | length > 0 %}
+    detected_platform: {{ _virt_type | to_json }}
+{% elif _virt_what | length > 0 %}
+    detected_platform: {{ _virt_what | to_json }}
+{% else %}
+    detected_platform: null
+{% endif %}
+    boot_mode: {{ ('UEFI' if (hv.disco_efi_dir.stat.exists | default(false)) else 'BIOS') | to_json }}
+{% set _init = hv.disco_init_system | default('') | trim %}
+    init_system: {{ _init | to_json if _init | length > 0 else 'null' }}

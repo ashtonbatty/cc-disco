@@ -1,0 +1,4 @@
+---
+profile: production
+skip_list:
+  - yaml[line-length]  # discovery Jinja2 expressions are inherently wide

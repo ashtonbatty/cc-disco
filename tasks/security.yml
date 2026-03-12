@@ -1,0 +1,73 @@
+---
+# Security: sudoers, sshd, PAM
+
+- name: Get main sudoers file
+  ansible.builtin.slurp:
+    src: /etc/sudoers
+  register: disco_sudoers_main
+  failed_when: false
+  no_log: true
+  tags: [security]
+
+- name: Find sudoers.d drop-in files
+  ansible.builtin.find:
+    paths: /etc/sudoers.d
+    file_type: file
+  register: disco_sudoers_d_files
+  failed_when: false
+  tags: [security]
+
+- name: Read each sudoers.d file
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ disco_sudoers_d_files.files | default([]) }}"
+  register: disco_sudoers_d_contents
+  failed_when: false
+  no_log: true
+  tags: [security]
+
+- name: Get sshd_config
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config
+  register: disco_sshd_config
+  failed_when: false
+  tags: [security]
+
+- name: Find sshd_config.d drop-ins (RHEL 8+)
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    file_type: file
+    patterns: "*.conf"
+  register: disco_sshd_d_files
+  failed_when: false
+  when: rhel_major | int >= 8
+  tags: [security]
+
+- name: Read sshd_config.d drop-in files
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ disco_sshd_d_files.files | default([]) }}"
+  register: disco_sshd_d_contents
+  failed_when: false
+  tags: [security]
+
+- name: Read key PAM configs
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/pam.d/system-auth
+    - /etc/pam.d/password-auth
+    - /etc/pam.d/sshd
+    - /etc/pam.d/su
+  register: disco_pam_contents
+  failed_when: false
+  no_log: true
+  tags: [security]
+
+- name: Get crypto policies (RHEL 8+)
+  ansible.builtin.command: update-crypto-policies --show
+  register: disco_crypto_policy
+  changed_when: false
+  failed_when: false
+  when: rhel_major | int >= 8
+  tags: [security]

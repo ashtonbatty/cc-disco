@@ -1,402 +1,57 @@
 ---
+{{ ansible_managed | comment }}
+#
 # RHEL Server Discovery Report
-# Generated: {{ hostvars[(report_hosts | default(groups['all'] | difference(['localhost'])))[0]].ansible_date_time.iso8601 | default('unknown') }}
-# Total hosts scanned: {{ report_hosts | default(groups['all'] | difference(['localhost'])) | length }}
+#
+# WARNING: This report contains security-sensitive data (sudoers, sshd, PAM, SSSD).
+# Handle with the same care as a credentials file. Do not share unredacted.
+#
+# Null convention: fields with value `null` indicate data was not collected,
+# not applicable, or the source was unavailable. Parsers should treat null
+# as "no data" — never as a valid result.
+#
+{% set _hosts = report_hosts | default(groups['all'] | difference(['localhost'])) %}
+{% if _hosts | length == 0 %}
+# No hosts were scanned. Check inventory and --limit arguments.
+{% else %}
+# Generated: {{ hostvars[_hosts[0]].ansible_date_time.iso8601 }}
+{% endif %}
+# Total hosts scanned: {{ _hosts | length }}
 
 {% for host in (report_hosts | default(groups['all'] | difference(['localhost']))) | sort %}
 {% set hv = hostvars[host] %}
 {% if hv.ansible_hostname is defined %}
 {{ host }}:
 
-  # ===========================================================================
-  # System
-  # ===========================================================================
-  system:
-    hostname: "{{ hv.ansible_hostname | default('unknown') }}"
-    fqdn: "{{ hv.ansible_fqdn | default('unknown') }}"
-    os: "{{ hv.ansible_distribution | default('unknown') }} {{ hv.ansible_distribution_version | default('') }}"
-    rhel_release: "{{ hv.ansible_distribution_major_version | default('unknown') }}"
-    rhel_release_string: "{{ (hv.disco_redhat_release.content | default('') | b64decode) | trim }}"
-    kernel: "{{ hv.ansible_kernel | default('unknown') }}"
-    architecture: "{{ hv.ansible_architecture | default('unknown') }}"
-    uptime_seconds: {{ hv.ansible_uptime_seconds | default(0) }}
-    uptime_days: {{ (hv.ansible_uptime_seconds | default(0) | int / 86400) | round(1) }}
+{% include 'sections/system.j2' %}
 
-  # ===========================================================================
-  # CPU and Memory
-  # ===========================================================================
-  cpu:
-    model: "{{ hv.ansible_processor[2] | default('unknown') if hv.ansible_processor | default([]) | length > 2 else 'unknown' }}"
-    physical_count: {{ hv.ansible_processor_count | default(0) }}
-    cores_per_socket: {{ hv.ansible_processor_cores | default(0) }}
-    total_vcpus: {{ hv.ansible_processor_vcpus | default(0) }}
-  memory:
-    total_mb: {{ hv.ansible_memtotal_mb | default(0) }}
-    swap_mb: {{ hv.ansible_swaptotal_mb | default(0) }}
+{% include 'sections/platform.j2' %}
 
-  # ===========================================================================
-  # Platform
-  # ===========================================================================
-  platform:
-{% set dmi_vendor_val = (hv.disco_dmi_vendor.content | default('') | b64decode) | trim %}
-{% set dmi_product_val = (hv.disco_dmi_product.content | default('') | b64decode) | trim %}
-    dmi_vendor: "{{ dmi_vendor_val | default('unknown') }}"
-    dmi_product: "{{ dmi_product_val | default('unknown') }}"
-    virt_type: "{{ hv.disco_virt_type.stdout | default('unknown') | trim }}"
-    virt_what: "{{ hv.disco_virt_what.stdout | default('unknown') | trim }}"
-{% if hv.disco_ec2_check.status | default(0) | int == 200 %}
-    detected_platform: "aws_ec2"
-{% elif hv.disco_azure_check.status | default(0) | int == 200 %}
-    detected_platform: "azure_vm"
-{% elif 'VMware' in dmi_vendor_val %}
-    detected_platform: "vmware"
-{% elif (hv.disco_virt_what.stdout | default('') | trim) == '' and (hv.disco_virt_type.stdout | default('none') | trim) == 'none' %}
-    detected_platform: "bare_metal"
-{% else %}
-    detected_platform: "{{ hv.disco_virt_type.stdout | default(hv.disco_virt_what.stdout | default('unknown')) | trim }}"
-{% endif %}
-    boot_mode: "{{ 'UEFI' if (hv.disco_efi_dir.stat.exists | default(false)) else 'BIOS' }}"
-    init_system: "{{ hv.disco_init_system.stdout | default('unknown') | trim }}"
+{% include 'sections/network.j2' %}
 
-  # ===========================================================================
-  # Network
-  # ===========================================================================
-  network:
-    default_ipv4: "{{ hv.ansible_default_ipv4.address | default('none') }}"
-    default_gateway: "{{ hv.ansible_default_ipv4.gateway | default('none') }}"
-    all_ipv4_addresses:
-{% for addr in hv.ansible_all_ipv4_addresses | default([]) %}
-      - "{{ addr }}"
-{% else %}
-      []
-{% endfor %}
-    all_ipv6_addresses:
-{% for addr in hv.ansible_all_ipv6_addresses | default([]) %}
-      - "{{ addr }}"
-{% else %}
-      []
-{% endfor %}
-    dns_nameservers:
-{% for ns in (hv.ansible_dns | default({})).nameservers | default([]) %}
-      - "{{ ns }}"
-{% else %}
-      []
-{% endfor %}
-    dns_search:
-{% for domain in (hv.ansible_dns | default({})).search | default([]) %}
-      - "{{ domain }}"
-{% else %}
-      []
-{% endfor %}
-    interfaces:
-{% for iface in hv.ansible_interfaces | default([]) | sort %}
-{% set iface_key = 'ansible_' + iface | replace('-', '_') | replace('.', '_') %}
-{% set iface_data = hv[iface_key] | default({}) %}
-      - name: "{{ iface }}"
-        ipv4: "{{ iface_data.ipv4.address | default('none') if iface_data.ipv4 is defined else 'none' }}"
-        macaddress: "{{ iface_data.macaddress | default('none') }}"
-        type: "{{ iface_data.type | default('unknown') }}"
-        active: {{ iface_data.active | default(false) }}
-{% else %}
-      []
-{% endfor %}
-    routes: |
-{{ hv.disco_routes.stdout | default('not collected') | indent(6, true) }}
-    networkmanager_active: "{{ hv.disco_nm_active.stdout | default('unknown') | trim }}"
-    nmcli_connections: |
-{{ hv.disco_nmcli_connections.stdout | default('not collected') | indent(6, true) }}
-    bonding:
-      interfaces: "{{ hv.disco_bond_interfaces.stdout | default('none') | trim }}"
-{% if hv.disco_bond_details is defined and hv.disco_bond_details.stdout | default('') | length > 0 %}
-      details: |
-{{ hv.disco_bond_details.stdout | indent(8, true) }}
-{% endif %}
-    teaming: |
-{{ hv.disco_team_details.stdout | default('not collected') | indent(6, true) }}
-    ifcfg_files: |
-{% if hv.disco_ifcfg_files.files | default([]) | length > 0 %}
-{% for file in hv.disco_ifcfg_files.files | default([]) | sort(attribute='path') %}
-      {{ file.path }}
-{% endfor %}
-{% else %}
-      none
-{% endif %}
+{% include 'sections/firewall.j2' %}
 
-  # ===========================================================================
-  # Firewall
-  # ===========================================================================
-  firewall:
-    firewalld_active: "{{ hv.disco_firewalld_active.stdout | default('unknown') | trim }}"
-{% if hv.disco_firewalld_zones is defined and hv.disco_firewalld_zones.stdout | default('') | length > 0 %}
-    firewalld_zones: |
-{{ hv.disco_firewalld_zones.stdout | indent(6, true) }}
-{% endif %}
-    iptables_active: "{{ hv.disco_iptables_active.stdout | default('unknown') | trim }}"
-    iptables_rules: |
-{{ hv.disco_iptables_rules.stdout | default('not collected') | indent(6, true) }}
-{% if hv.disco_nftables_rules is defined and hv.disco_nftables_rules.stdout | default('') | length > 0 %}
-    nftables_rules: |
-{{ hv.disco_nftables_rules.stdout | indent(6, true) }}
-{% endif %}
+{% include 'sections/storage.j2' %}
 
-  # ===========================================================================
-  # Storage
-  # ===========================================================================
-  storage:
-    mounts:
-{% for mount in hv.ansible_mounts | default([]) %}
-      - device: "{{ mount.device }}"
-        mount: "{{ mount.mount }}"
-        fstype: "{{ mount.fstype }}"
-        size_total_bytes: {{ mount.size_total | default(0) }}
-        size_available_bytes: {{ mount.size_available | default(0) }}
-        options: "{{ mount.options | default('') }}"
-{% else %}
-      []
-{% endfor %}
-    disk_usage: |
-{{ hv.disco_df.stdout | default('not collected') | indent(6, true) }}
-    block_devices: |
-{{ hv.disco_lsblk.stdout | default('not collected') | indent(6, true) }}
-    lvm:
-      physical_volumes: |
-{{ hv.disco_pvs.stdout | default('none') | indent(8, true) }}
-      volume_groups: |
-{{ hv.disco_vgs.stdout | default('none') | indent(8, true) }}
-      logical_volumes: |
-{{ hv.disco_lvs.stdout | default('none') | indent(8, true) }}
-    fstab: |
-{{ (hv.disco_fstab.content | default('') | b64decode) | indent(6, true) }}
-    multipath: |
-{{ hv.disco_multipath.stdout | default('not configured') | indent(6, true) }}
-    nfs_cifs_mounts: |
-{{ hv.disco_nfs_mounts.stdout | default('none') | indent(6, true) }}
+{% include 'sections/selinux.j2' %}
 
-  # ===========================================================================
-  # SELinux
-  # ===========================================================================
-  selinux:
-    status: |
-{{ hv.disco_selinux_status.stdout | default('not collected') | indent(6, true) }}
-    config: |
-{{ (hv.disco_selinux_config.content | default('') | b64decode) | indent(6, true) }}
+{% include 'sections/security.j2' %}
 
-  # ===========================================================================
-  # Security
-  # ===========================================================================
-  security:
-    sudoers_main: |
-{{ (hv.disco_sudoers_main.content | default('') | b64decode) | indent(6, true) }}
-    sudoers_drop_ins:
-{% for item in hv.disco_sudoers_d_contents.results | default([]) %}
-{% if item.content is defined %}
-      - file: "{{ item.item.path | default('unknown') }}"
-        content: |
-{{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
-{% else %}
-      []
-{% endfor %}
-    sshd_config: |
-{{ (hv.disco_sshd_config.content | default('') | b64decode) | indent(6, true) }}
-{% if hv.disco_sshd_d_contents is defined %}
-    sshd_config_drop_ins:
-{% for item in hv.disco_sshd_d_contents.results | default([]) %}
-{% if item.content is defined %}
-      - file: "{{ item.item.path | default('unknown') }}"
-        content: |
-{{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
-{% else %}
-      []
-{% endfor %}
-{% endif %}
-    pam:
-{% for item in hv.disco_pam_contents.results | default([]) %}
-{% if item.content is defined %}
-      - file: "{{ item.item }}"
-        content: |
-{{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
-{% else %}
-      []
-{% endfor %}
-    crypto_policy: "{{ hv.disco_crypto_policy.stdout | default('N/A (pre-RHEL 8)') | trim }}"
+{% include 'sections/identity.j2' %}
 
-  # ===========================================================================
-  # Identity / Domain Join
-  # ===========================================================================
-  identity:
-    sssd_conf: |
-{{ (hv.disco_sssd_conf.content | default('') | b64decode) | indent(6, true) }}
-    realm_list: |
-{{ hv.disco_realm_list.stdout | default('not collected or not joined') | indent(6, true) }}
-    krb5_conf: |
-{{ (hv.disco_krb5_conf.content | default('') | b64decode) | indent(6, true) }}
-    krb5_keytab_exists: {{ hv.disco_krb5_keytab.stat.exists | default(false) }}
-    nsswitch_conf: |
-{{ (hv.disco_nsswitch_conf.content | default('') | b64decode) | indent(6, true) }}
+{% include 'sections/kernel.j2' %}
 
-  # ===========================================================================
-  # Kernel and Modules
-  # ===========================================================================
-  kernel:
-    loaded_modules: |
-{{ hv.disco_lsmod.stdout | default('not collected') | indent(6, true) }}
-    third_party_modules:
-{% for line in hv.disco_third_party_modules.stdout_lines | default([]) %}
-{% set parts = line.split('|') %}
-      - module: "{{ parts[0] | default('unknown') }}"
-        filename: "{{ parts[1] | default('unknown') }}"
-        author: "{{ parts[2] | default('unknown') }}"
-{% else %}
-      []
-{% endfor %}
-    deprecated_modules:
-{% for line in hv.disco_deprecated_modules.stdout_lines | default([]) %}
-      - "{{ line.split(':')[1] | default(line) }}"
-{% else %}
-      []
-{% endfor %}
-    last_kernel_update: "{{ hv.disco_last_kernel_update.stdout | default('unknown') | trim }}"
-    grub_defaults: |
-{{ (hv.disco_grub_defaults.content | default('') | b64decode) | indent(6, true) }}
+{% include 'sections/services.j2' %}
 
-  # ===========================================================================
-  # Services
-  # ===========================================================================
-  services:
-{% if hv.disco_init_system.stdout | default('') == 'systemd' %}
-    enabled_services: |
-{{ hv.disco_systemd_enabled.stdout | default('') | indent(6, true) }}
-    running_services: |
-{{ hv.disco_systemd_running.stdout | default('') | indent(6, true) }}
-{% elif hv.disco_chkconfig is defined and hv.disco_chkconfig.stdout is defined %}
-    chkconfig_services: |
-{{ hv.disco_chkconfig.stdout | indent(6, true) }}
-{% else %}
-    enabled_services: "not collected"
-{% endif %}
-    tuned_profile: "{{ hv.disco_tuned_profile.stdout | default('unknown') | trim }}"
+{% include 'sections/packages.j2' %}
 
-  # ===========================================================================
-  # Packages
-  # ===========================================================================
-  packages:
-    total_count: {{ hv.disco_pkg_count.stdout | default(0) | trim }}
-    non_redhat_packages:
-{% for line in hv.disco_non_rh_packages.stdout_lines | default([]) %}
-{% set parts = line.split('|') %}
-      - name: "{{ parts[0] | default('unknown') }}"
-        vendor: "{{ parts[1] | default('unknown') }}"
-        version: "{{ parts[2] | default('unknown') }}"
-{% else %}
-      []
-{% endfor %}
-    versionlocks: |
-{{ hv.disco_versionlocks.stdout | default('none') | indent(6, true) }}
-    enabled_repos: |
-{{ hv.disco_repos_enabled.stdout | default('not collected') | indent(6, true) }}
-    non_satellite_repos: |
-{{ hv.disco_non_satellite_repos.stdout | default('none') | indent(6, true) }}
+{% include 'sections/satellite.j2' %}
 
-  # ===========================================================================
-  # Satellite / Subscription
-  # ===========================================================================
-  satellite:
-    subscription_identity: |
-{{ hv.disco_sub_identity.stdout | default('not registered') | indent(6, true) }}
-    subscription_status: |
-{{ hv.disco_sub_status.stdout | default('unknown') | indent(6, true) }}
-    satellite_server: "{{ hv.disco_satellite_server.stdout | default('unknown') | trim }}"
-    katello_packages: "{{ hv.disco_katello_info.stdout | default('not installed') | trim }}"
+{% include 'sections/backup.j2' %}
 
-  # ===========================================================================
-  # Backup and Monitoring Agents
-  # ===========================================================================
-  agents_detected:
-{% for agent in hv.disco_backup_monitoring.stdout_lines | default([]) %}
-{% if agent | trim | length > 0 %}
-    - "{{ agent | trim }}"
-{% endif %}
-{% else %}
-    []
-{% endfor %}
+{% include 'sections/filesystem.j2' %}
 
-  # ===========================================================================
-  # Common Applications
-  # ===========================================================================
-  common_apps:
-{% for app in hv.disco_common_apps.stdout_lines | default([]) %}
-{% if app | trim | length > 0 %}
-    - "{{ app | trim }}"
-{% endif %}
-{% else %}
-    []
-{% endfor %}
-
-  # ===========================================================================
-  # Filesystem Exploration
-  # ===========================================================================
-  directories:
-    opt:
-{% for entry in hv.disco_opt_listing.files | default([]) | sort(attribute='path') %}
-      - "{{ entry.path | trim }}"
-{% else %}
-      []
-{% endfor %}
-    data:
-{% for entry in hv.disco_data_listing.files | default([]) | sort(attribute='path') %}
-      - "{{ entry.path | trim }}"
-{% else %}
-      []
-{% endfor %}
-    third_party_paths: |
-{{ hv.disco_third_party_paths.stdout | default('not collected') | indent(6, true) }}
-
-  # ===========================================================================
-  # RHEL 9/10 Migration Readiness
-  # ===========================================================================
-  migration:
-    python_versions: |
-{{ hv.disco_python_versions.stdout | default('not collected') | indent(6, true) }}
-    packages_32bit_count: {{ (hv.disco_32bit_packages.stdout_lines | default([])) | length }}
-{% if (hv.disco_32bit_packages.stdout_lines | default([])) | length > 0 %}
-    packages_32bit:
-{% for pkg in hv.disco_32bit_packages.stdout_lines | default([]) %}
-      - "{{ pkg }}"
-{% endfor %}
-{% endif %}
-    deprecated_packages:
-{% for pkg in hv.disco_deprecated_packages.stdout_lines | default([]) %}
-      - "{{ pkg }}"
-{% else %}
-      []
-{% endfor %}
-    time_service: |
-{{ hv.disco_time_services.stdout | default('not collected') | indent(6, true) }}
-    xinetd_services: |
-{% if hv.disco_xinetd.files | default([]) | length > 0 %}
-{% for entry in hv.disco_xinetd.files | default([]) | sort(attribute='path') %}
-      {{ entry.path | basename }}
-{% endfor %}
-{% else %}
-      not present
-{% endif %}
-    legacy_network: "{{ hv.disco_legacy_network.stdout | default('not checked') | trim }}"
-    openssl_version: "{{ hv.disco_openssl_version.stdout | default('unknown') | trim }}"
-    fstab_concerns: |
-{{ hv.disco_fstab_concerns.stdout | default('none') | indent(6, true) }}
-    root_crontab: |
-{{ hv.disco_root_crontab.stdout | default('no crontab') | indent(6, true) }}
-    system_crontab: |
-{{ (hv.disco_system_crontab.content | default('') | b64decode) | indent(6, true) }}
-    cron_d_entries:
-{% for entry in hv.disco_cron_d.files | default([]) | sort(attribute='path') %}
-      - "{{ entry.path | basename | trim }}"
-{% else %}
-      []
-{% endfor %}
+{% include 'sections/readiness.j2' %}
 
 {% endif %}
 {% endfor %}

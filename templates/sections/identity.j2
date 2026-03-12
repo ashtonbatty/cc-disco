@@ -1,0 +1,33 @@
+  # ===========================================================================
+  # Identity / Domain Join
+  # ===========================================================================
+  identity:
+{% set _sssd = (hv.disco_sssd_conf.content | default('') | b64decode) | trim %}
+{% if _sssd | length > 0 %}
+    sssd_conf: |
+{{ _sssd | indent(6, true) }}
+{% else %}
+    sssd_conf: null
+{% endif %}
+{% set _realm = hv.disco_realm_list.stdout | default('') | trim %}
+{% if _realm | length > 0 %}
+    realm_list: |
+{{ _realm | indent(6, true) }}
+{% else %}
+    realm_list: null
+{% endif %}
+{% set _krb5 = (hv.disco_krb5_conf.content | default('') | b64decode) | trim %}
+{% if _krb5 | length > 0 %}
+    krb5_conf: |
+{{ _krb5 | indent(6, true) }}
+{% else %}
+    krb5_conf: null
+{% endif %}
+    krb5_keytab_exists: {{ hv.disco_krb5_keytab.stat.exists | default(false) }}
+{% set _nss = (hv.disco_nsswitch_conf.content | default('') | b64decode) | trim %}
+{% if _nss | length > 0 %}
+    nsswitch_conf: |
+{{ _nss | indent(6, true) }}
+{% else %}
+    nsswitch_conf: null
+{% endif %}

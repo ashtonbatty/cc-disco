@@ -1,0 +1,62 @@
+---
+# Platform Detection
+
+- name: Read DMI system vendor
+  ansible.builtin.slurp:
+    src: /sys/class/dmi/id/sys_vendor
+  register: disco_dmi_vendor
+  failed_when: false
+  tags: [platform]
+
+- name: Read DMI product name
+  ansible.builtin.slurp:
+    src: /sys/class/dmi/id/product_name
+  register: disco_dmi_product
+  failed_when: false
+  tags: [platform]
+
+# IMDS endpoints require HTTP — HTTPS is not supported by cloud metadata services.
+# Skip on hosts where DMI vendor identifies known non-cloud hardware to avoid
+# a 2-second timeout penalty per check on bare-metal and VMware hosts.
+- name: Check for AWS EC2 (IMDS)
+  ansible.builtin.uri:
+    url: http://169.254.169.254/latest/meta-data/instance-id
+    timeout: 2
+  register: disco_ec2_check
+  changed_when: false
+  failed_when: false
+  when: >-
+    disco_dmi_vendor is not defined
+    or (disco_dmi_vendor.content | default('') | b64decode | trim)
+       is not search('(?i)VMware|Dell|HP|HPE|Lenovo|Supermicro|Cisco')
+  tags: [platform]
+
+# IMDS endpoints require HTTP — HTTPS is not supported by cloud metadata services
+- name: Check for Azure VM (IMDS)
+  ansible.builtin.uri:
+    url: http://169.254.169.254/metadata/instance?api-version=2021-02-01
+    headers:
+      Metadata: "true"
+    timeout: 2
+  register: disco_azure_check
+  changed_when: false
+  failed_when: false
+  when: >-
+    disco_dmi_vendor is not defined
+    or (disco_dmi_vendor.content | default('') | b64decode | trim)
+       is not search('(?i)VMware|Dell|HP|HPE|Lenovo|Supermicro|Cisco')
+  tags: [platform]
+
+- name: Detect virtualisation via systemd-detect-virt
+  ansible.builtin.command: systemd-detect-virt
+  register: disco_virt_type
+  changed_when: false
+  failed_when: false
+  tags: [platform]
+
+- name: Detect virtualisation via virt-what
+  ansible.builtin.command: virt-what
+  register: disco_virt_what
+  changed_when: false
+  failed_when: false
+  tags: [platform]

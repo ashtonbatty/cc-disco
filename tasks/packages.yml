@@ -1,0 +1,80 @@
+---
+# Package Management and Repos
+
+- name: Get installed package count from package facts
+  ansible.builtin.set_fact:
+    disco_pkg_count: "{{ (ansible_facts.packages | default({})) | length }}"
+  tags: [packages]
+
+- name: Build non-Red Hat package list from package facts
+  ansible.builtin.set_fact:
+    disco_non_rh_packages: >-
+      {%- set result = [] -%}
+      {%- for name, versions in (ansible_facts.packages | default({})).items() -%}
+        {%- if name != 'gpg-pubkey' -%}
+          {%- for v in versions -%}
+            {%- if (v.vendor | default('')) is not search('(?i)Red Hat') -%}
+              {%- set _ = result.append(name ~ '|' ~ (v.vendor | default('unknown')) ~ '|' ~ (v.version | default('unknown')) ~ '-' ~ (v.release | default('')) ~ '.' ~ (v.arch | default('unknown'))) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result }}
+  tags: [packages]
+
+- name: Get yum/dnf versionlocks
+  # versionlock plugin output is command-specific and not exposed via Ansible facts.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v dnf >/dev/null 2>&1; then
+      dnf versionlock list 2>/dev/null || echo "versionlock plugin not installed"
+    elif command -v yum >/dev/null 2>&1; then
+      yum versionlock list 2>/dev/null || echo "versionlock plugin not installed"
+    else
+      echo "dnf/yum not found"
+    fi
+  args:
+    executable: /bin/bash
+  register: disco_versionlocks
+  changed_when: false
+  failed_when: false
+  tags: [packages]
+
+- name: Get enabled repos
+  # Repo enablement details are sourced from yum/dnf CLI; no unified built-in fact exists.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v dnf >/dev/null 2>&1; then
+      dnf repolist enabled 2>/dev/null
+    elif command -v yum >/dev/null 2>&1; then
+      yum repolist enabled 2>/dev/null
+    else
+      echo "dnf/yum not found"
+    fi
+  args:
+    executable: /bin/bash
+  register: disco_repos_enabled
+  changed_when: false
+  failed_when: false
+  tags: [packages]
+
+- name: Detect non-satellite repos
+  # Parsing repo file key/value content has no direct module output for this exact schema.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for f in /etc/yum.repos.d/*.repo; do
+      [ -f "$f" ] || continue
+      if grep -qE '^\s*(baseurl|mirrorlist|metalink)\s*=' "$f" 2>/dev/null; then
+        if ! grep -qiE 'satellite|capsule|katello|cdn\.redhat\.com' "$f" 2>/dev/null; then
+          echo "$f"
+          grep -E '^\s*(name|baseurl|mirrorlist|metalink)\s*=' "$f"
+          echo "---"
+        fi
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: disco_non_satellite_repos
+  changed_when: false
+  failed_when: false
+  tags: [packages]

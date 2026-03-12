@@ -1,0 +1,35 @@
+  # ===========================================================================
+  # Packages
+  # ===========================================================================
+  packages:
+    total_count: {{ hv.disco_pkg_count | default(0) | trim }}
+    non_redhat_packages:
+{% for line in hv.disco_non_rh_packages | default([]) %}
+{% set parts = line.split('|') %}
+      - name: {{ parts[0] | default(none) | to_json }}
+        vendor: {{ parts[1] | default(none) | to_json }}
+        version: {{ parts[2] | default(none) | to_json }}
+{% else %}
+      []
+{% endfor %}
+{% set _vlocks = hv.disco_versionlocks.stdout | default('') | trim %}
+{% if _vlocks | length > 0 %}
+    versionlocks: |
+{{ _vlocks | indent(6, true) }}
+{% else %}
+    versionlocks: null
+{% endif %}
+{% set _repos = hv.disco_repos_enabled.stdout | default('') | trim %}
+{% if _repos | length > 0 %}
+    enabled_repos: |
+{{ _repos | indent(6, true) }}
+{% else %}
+    enabled_repos: null
+{% endif %}
+{% set _nonsat = hv.disco_non_satellite_repos.stdout | default('') | trim %}
+{% if _nonsat | length > 0 %}
+    non_satellite_repos: |
+{{ _nonsat | indent(6, true) }}
+{% else %}
+    non_satellite_repos: null
+{% endif %}

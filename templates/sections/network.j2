@@ -1,0 +1,86 @@
+  # ===========================================================================
+  # Network
+  # ===========================================================================
+  network:
+    default_ipv4: {{ (hv.ansible_default_ipv4 | default({})).address | default(none) | to_json }}
+    default_gateway: {{ (hv.ansible_default_ipv4 | default({})).gateway | default(none) | to_json }}
+    all_ipv4_addresses:
+{% for addr in hv.ansible_all_ipv4_addresses | default([]) %}
+      - "{{ addr }}"
+{% else %}
+      []
+{% endfor %}
+    all_ipv6_addresses:
+{% for addr in hv.ansible_all_ipv6_addresses | default([]) %}
+      - "{{ addr }}"
+{% else %}
+      []
+{% endfor %}
+    dns_nameservers:
+{% for ns in (hv.ansible_dns | default({})).nameservers | default([]) %}
+      - "{{ ns }}"
+{% else %}
+      []
+{% endfor %}
+    dns_search:
+{% for domain in (hv.ansible_dns | default({})).search | default([]) %}
+      - "{{ domain }}"
+{% else %}
+      []
+{% endfor %}
+    interfaces:
+{% for iface in hv.ansible_interfaces | default([]) | sort %}
+{% set iface_key = 'ansible_' + iface | replace('-', '_') | replace('.', '_') %}
+{% set iface_data = hv[iface_key] | default({}) %}
+      - name: "{{ iface }}"
+        ipv4: {{ (iface_data.ipv4.address | to_json) if iface_data.ipv4 is defined and iface_data.ipv4.address is defined else 'null' }}
+        macaddress: {{ iface_data.macaddress | default(none) | to_json }}
+        type: {{ iface_data.type | default(none) | to_json }}
+        active: {{ iface_data.active | default(false) }}
+{% else %}
+      []
+{% endfor %}
+{% set _routes = hv.disco_routes.stdout | default('') | trim %}
+{% if _routes | length > 0 %}
+    routes: |
+{{ _routes | indent(6, true) }}
+{% else %}
+    routes: null
+{% endif %}
+{% set _nm_active = hv.disco_nm_active | default('') | trim %}
+    networkmanager_active: {{ _nm_active | to_json if _nm_active | length > 0 else 'null' }}
+{% set _nmcli = hv.disco_nmcli_connections.stdout | default('') | trim %}
+{% if _nmcli | length > 0 %}
+    nmcli_connections: |
+{{ _nmcli | indent(6, true) }}
+{% else %}
+    nmcli_connections: null
+{% endif %}
+    bonding:
+      interfaces:
+{% set _bond_ifaces = (hv.disco_bond_interfaces | default('') | trim).split('\n') | select() | list %}
+{% for name in _bond_ifaces %}
+        - "{{ name | trim }}"
+{% else %}
+        []
+{% endfor %}
+{% set _bond_details = (hv.disco_bond_details | default({})).stdout | default('') | trim %}
+{% if _bond_details | length > 0 %}
+      details: |
+{{ _bond_details | indent(8, true) }}
+{% else %}
+      details: null
+{% endif %}
+{% set _team = hv.disco_team_details.stdout | default('') | trim %}
+{% if _team | length > 0 %}
+    teaming: |
+{{ _team | indent(6, true) }}
+{% else %}
+    teaming: null
+{% endif %}
+    ifcfg_files:
+{% for file in hv.disco_ifcfg_files.files | default([]) | sort(attribute='path') %}
+      - "{{ file.path }}"
+{% else %}
+      []
+{% endfor %}

@@ -1,0 +1,29 @@
+---
+# Init System and Services
+
+- name: Detect init system
+  ansible.builtin.set_fact:
+    disco_init_system: "{{ 'systemd' if ansible_service_mgr | default('') == 'systemd' else 'sysvinit' }}"
+  tags: [services]
+
+- name: Build enabled and running service lists from service facts
+  ansible.builtin.set_fact:
+    disco_systemd_enabled: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.status', 'defined') | selectattr('value.status', 'equalto', 'enabled') | map(attribute='key') | list | join('\n') }}"
+    disco_systemd_running: "{{ ansible_facts.services | default({}) | dict2items | selectattr('value.state', 'defined') | selectattr('value.state', 'equalto', 'running') | map(attribute='key') | list | join('\n') }}"
+  tags: [services]
+
+- name: Get chkconfig services (sysvinit)
+  # SysV chkconfig listing has no cross-version fact replacement.
+  ansible.builtin.command: chkconfig --list  # noqa command-instead-of-module
+  register: disco_chkconfig
+  changed_when: false
+  failed_when: false
+  when: disco_init_system | default('') != 'systemd'
+  tags: [services]
+
+- name: Get tuned profile
+  ansible.builtin.command: tuned-adm active
+  register: disco_tuned_profile
+  changed_when: false
+  failed_when: false
+  tags: [services]

@@ -1,0 +1,38 @@
+---
+# Identity / Domain Join
+
+- name: Get SSSD config
+  ansible.builtin.slurp:
+    src: /etc/sssd/sssd.conf
+  register: disco_sssd_conf
+  failed_when: false
+  no_log: true
+  tags: [identity]
+
+- name: Get realm list
+  ansible.builtin.command: realm list
+  register: disco_realm_list
+  changed_when: false
+  failed_when: false
+  tags: [identity]
+
+- name: Get krb5.conf
+  ansible.builtin.slurp:
+    src: /etc/krb5.conf
+  register: disco_krb5_conf
+  failed_when: false
+  tags: [identity]
+
+- name: Check if host is domain-joined (keytab exists)
+  ansible.builtin.stat:
+    path: /etc/krb5.keytab
+  register: disco_krb5_keytab
+  failed_when: false
+  tags: [identity]
+
+- name: Get nsswitch.conf
+  ansible.builtin.slurp:
+    src: /etc/nsswitch.conf
+  register: disco_nsswitch_conf
+  failed_when: false
+  tags: [identity]

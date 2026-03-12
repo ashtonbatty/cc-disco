@@ -1,0 +1,40 @@
+---
+# Filesystem Exploration
+
+- name: List /opt subdirectories
+  ansible.builtin.find:
+    paths: /opt
+    file_type: directory
+    recurse: false
+  register: disco_opt_listing
+  failed_when: false
+  tags: [filesystem]
+
+- name: List /data subdirectories
+  ansible.builtin.find:
+    paths: /data
+    file_type: directory
+    recurse: false
+  register: disco_data_listing
+  failed_when: false
+  tags: [filesystem]
+
+- name: Check third-party software in common paths
+  # This is a bespoke directory inventory across multiple optional roots.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for d in /usr/local/bin /usr/local/sbin /app /apps /software; do
+      if [ -d "$d" ]; then
+        listing=$(ls -1 "$d" 2>/dev/null)
+        if [ -n "$listing" ]; then
+          echo "=== ${d} ==="
+          echo "$listing"
+        fi
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: disco_third_party_paths
+  changed_when: false
+  failed_when: false
+  tags: [filesystem]

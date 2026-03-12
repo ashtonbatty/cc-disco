@@ -1,0 +1,86 @@
+---
+# Networking
+
+- name: Get routing table
+  ansible.builtin.command: ip route show
+  register: disco_routes
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: Get resolv.conf
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: disco_resolv_conf
+  failed_when: false
+  tags: [network]
+
+- name: Determine NetworkManager state from service facts
+  ansible.builtin.set_fact:
+    disco_nm_active: >-
+      {{
+        ansible_facts.services['NetworkManager.service'].state
+        if 'NetworkManager.service' in (ansible_facts.services | default({}))
+        else (
+          ansible_facts.services['NetworkManager'].state
+          if 'NetworkManager' in (ansible_facts.services | default({}))
+          else 'not found'
+        )
+      }}
+  tags: [network]
+
+- name: Get NetworkManager connection profiles
+  ansible.builtin.command: nmcli -t connection show
+  register: disco_nmcli_connections
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: Find network bonding interface metadata
+  ansible.builtin.find:
+    paths: /proc/net/bonding
+    file_type: file
+  register: disco_bond_files
+  failed_when: false
+  tags: [network]
+
+- name: Normalize network bonding interface list
+  ansible.builtin.set_fact:
+    disco_bond_interfaces: "{{ disco_bond_files.files | default([]) | map(attribute='path') | map('basename') | list | join('\n') }}"
+  tags: [network]
+
+- name: Get bond details
+  # Bond mode/slave details are only available in /proc/net/bonding/* text files.
+  ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
+  register: disco_bond_details
+  changed_when: false
+  failed_when: false
+  when: disco_bond_files.matched | default(0) | int > 0
+  tags: [network]
+
+- name: Check for network teaming
+  # teamdctl state data has no equivalent Ansible fact/module on RHEL 6/7/8.
+  ansible.builtin.shell: |
+    set -o pipefail
+    command -v teamdctl >/dev/null 2>&1 || { echo "teamdctl not found"; exit 0; }
+    command -v ip >/dev/null 2>&1 || { echo "ip not found"; exit 0; }
+    teamdctl -h >/dev/null 2>&1 && \
+    for dev in $(ip -o link show type team 2>/dev/null | awk -F': ' '{print $2}'); do
+      echo "=== $dev ==="
+      teamdctl "$dev" state
+    done
+  args:
+    executable: /bin/bash
+  register: disco_team_details
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: List network-scripts ifcfg files
+  ansible.builtin.find:
+    paths: /etc/sysconfig/network-scripts
+    patterns: "ifcfg-*"
+    file_type: file
+  register: disco_ifcfg_files
+  failed_when: false
+  tags: [network]

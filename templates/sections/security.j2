@@ -1,0 +1,52 @@
+  # ===========================================================================
+  # Security
+  # ===========================================================================
+  security:
+{% set _sudoers = (hv.disco_sudoers_main.content | default('') | b64decode) | trim %}
+{% if _sudoers | length > 0 %}
+    sudoers_main: |
+{{ _sudoers | indent(6, true) }}
+{% else %}
+    sudoers_main: null
+{% endif %}
+    sudoers_drop_ins:
+{% for item in hv.disco_sudoers_d_contents.results | default([]) %}
+{% if item.content is defined %}
+      - file: "{{ item.item.path }}"
+        content: |
+{{ (item.content | b64decode) | indent(10, true) }}
+{% endif %}
+{% else %}
+      []
+{% endfor %}
+{% set _sshd = (hv.disco_sshd_config.content | default('') | b64decode) | trim %}
+{% if _sshd | length > 0 %}
+    sshd_config: |
+{{ _sshd | indent(6, true) }}
+{% else %}
+    sshd_config: null
+{% endif %}
+{% if hv.disco_sshd_d_contents is defined %}
+    sshd_config_drop_ins:
+{% for item in hv.disco_sshd_d_contents.results | default([]) %}
+{% if item.content is defined %}
+      - file: "{{ item.item.path }}"
+        content: |
+{{ (item.content | b64decode) | indent(10, true) }}
+{% endif %}
+{% else %}
+      []
+{% endfor %}
+{% endif %}
+    pam:
+{% for item in hv.disco_pam_contents.results | default([]) %}
+{% if item.content is defined %}
+      - file: "{{ item.item }}"
+        content: |
+{{ (item.content | b64decode) | indent(10, true) }}
+{% endif %}
+{% else %}
+      []
+{% endfor %}
+{% set _crypto = (hv.disco_crypto_policy | default({})).stdout | default('') | trim %}
+    crypto_policy: {{ _crypto | to_json if _crypto | length > 0 else 'null' }}

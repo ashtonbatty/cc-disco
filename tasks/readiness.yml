@@ -1,0 +1,153 @@
+---
+# RHEL 9/10 Migration Readiness
+
+- name: Get Python versions
+  # Python interpreter discovery across legacy paths requires command probing.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v python >/dev/null 2>&1; then
+      echo "python:$(python --version 2>&1)"
+    else
+      echo "python:not found"
+    fi
+    if command -v python2 >/dev/null 2>&1; then
+      echo "python2:$(python2 --version 2>&1)"
+    else
+      echo "python2:not found"
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+      echo "python3:$(python3 --version 2>&1)"
+    else
+      echo "python3:not found"
+    fi
+    if [ -x /usr/libexec/platform-python ]; then
+      echo "platform-python:$(/usr/libexec/platform-python --version 2>&1)"
+    else
+      echo "platform-python:not found"
+    fi
+  args:
+    executable: /bin/bash
+  register: disco_python_versions
+  changed_when: false
+  failed_when: false
+  tags: [readiness]
+
+- name: Build 32-bit package list from package facts
+  ansible.builtin.set_fact:
+    disco_32bit_packages: >-
+      {%- set result = [] -%}
+      {%- for name, versions in (ansible_facts.packages | default({})).items() -%}
+        {%- for v in versions -%}
+          {%- if (v.arch | default('')) is match('i[36]86') -%}
+            {%- set _ = result.append(name ~ '-' ~ v.version ~ '-' ~ v.release ~ '.' ~ v.arch) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+  tags: [readiness]
+
+- name: Build deprecated package list from package facts
+  ansible.builtin.set_fact:
+    disco_deprecated_packages: >-
+      {{ ['ntp', 'sendmail', 'vsftpd', 'xinetd', 'talk', 'ypserv', 'ypbind', 'iptables-services', 'net-tools']
+         | select('in', ansible_facts.packages | default({}))
+         | list }}
+  tags: [readiness]
+
+- name: Build chronyd vs ntpd status from service facts
+  ansible.builtin.set_fact:
+    disco_time_services: |
+      ntpd:{{
+        ansible_facts.services['ntpd.service'].state
+        if 'ntpd.service' in (ansible_facts.services | default({}))
+        else (
+          ansible_facts.services['ntpd'].state
+          if 'ntpd' in (ansible_facts.services | default({}))
+          else 'not found'
+        )
+      }}
+      chronyd:{{
+        ansible_facts.services['chronyd.service'].state
+        if 'chronyd.service' in (ansible_facts.services | default({}))
+        else (
+          ansible_facts.services['chronyd'].state
+          if 'chronyd' in (ansible_facts.services | default({}))
+          else 'not found'
+        )
+      }}
+  tags: [readiness]
+
+- name: Check for xinetd services
+  ansible.builtin.find:
+    paths: /etc/xinetd.d
+    file_type: file
+    recurse: false
+  register: disco_xinetd
+  failed_when: false
+  tags: [readiness]
+
+- name: Check legacy network config vs NetworkManager
+  ansible.builtin.set_fact:
+    disco_legacy_network: "ifcfg_count:{{ disco_ifcfg_files.matched | default(0) }},nm_status:{{ disco_nm_active | default('unknown') }}"
+  tags: [readiness, network]
+
+- name: Check for NFS/CIFS fstab entries and deprecated mount options
+  # Exact option detection in /etc/fstab requires line-oriented regex parsing.
+  ansible.builtin.shell: |
+    set -o pipefail
+    [ -f /etc/fstab ] || { echo "none found"; exit 0; }
+    grep -E 'nfs|cifs|ext[23]|_netdev' /etc/fstab 2>/dev/null || echo "none found"
+  args:
+    executable: /bin/bash
+  register: disco_fstab_concerns
+  changed_when: false
+  failed_when: false
+  tags: [readiness]
+
+- name: Get OpenSSL version
+  ansible.builtin.command: openssl version
+  register: disco_openssl_version
+  changed_when: false
+  failed_when: false
+  tags: [readiness]
+
+- name: Get root crontab
+  ansible.builtin.command: crontab -l
+  register: disco_root_crontab
+  changed_when: false
+  failed_when: false
+  tags: [readiness]
+
+- name: Get system crontab
+  ansible.builtin.slurp:
+    src: /etc/crontab
+  register: disco_system_crontab
+  failed_when: false
+  tags: [readiness]
+
+- name: List cron.d entries
+  ansible.builtin.find:
+    paths: /etc/cron.d
+    file_type: file
+    recurse: false
+  register: disco_cron_d
+  failed_when: false
+  tags: [readiness]
+
+# Common application detection
+- name: Build common server application list from package facts
+  ansible.builtin.set_fact:
+    disco_common_apps: >-
+      {%- set result = [] -%}
+      {%- set known_apps = ['httpd', 'nginx', 'mysql-server', 'mariadb-server', 'postgresql-server', 'tomcat', 'docker', 'podman'] -%}
+      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- for app in known_apps -%}
+        {%- if app in pkgs -%}{%- set _ = result.append(app) -%}{%- endif -%}
+      {%- endfor -%}
+      {%- for name in pkgs -%}
+        {%- if name is match('^java-.*-openjdk$|^oracle-database-preinstall.*$') and name not in result -%}
+          {%- set _ = result.append(name) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result }}
+  tags: [readiness, apps]

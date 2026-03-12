@@ -1,0 +1,18 @@
+  # ===========================================================================
+  # SELinux
+  # ===========================================================================
+  selinux:
+{% set _sel_status = hv.disco_selinux_status.stdout | default('') | trim %}
+{% if _sel_status | length > 0 %}
+    status: |
+{{ _sel_status | indent(6, true) }}
+{% else %}
+    status: null
+{% endif %}
+{% set _sel_config = (hv.disco_selinux_config.content | default('') | b64decode) | trim %}
+{% if _sel_config | length > 0 %}
+    config: |
+{{ _sel_config | indent(6, true) }}
+{% else %}
+    config: null
+{% endif %}

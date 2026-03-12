@@ -1,0 +1,27 @@
+  # ===========================================================================
+  # Services
+  # ===========================================================================
+  services:
+{% if hv.disco_init_system | default('') == 'systemd' %}
+{% set _enabled = hv.disco_systemd_enabled | default('') | trim %}
+{% if _enabled | length > 0 %}
+    enabled_services: |
+{{ _enabled | indent(6, true) }}
+{% else %}
+    enabled_services: null
+{% endif %}
+{% set _running = hv.disco_systemd_running | default('') | trim %}
+{% if _running | length > 0 %}
+    running_services: |
+{{ _running | indent(6, true) }}
+{% else %}
+    running_services: null
+{% endif %}
+{% elif hv.disco_chkconfig is defined and hv.disco_chkconfig.stdout is defined %}
+    chkconfig_services: |
+{{ hv.disco_chkconfig.stdout | indent(6, true) }}
+{% else %}
+    enabled_services: null
+{% endif %}
+{% set _tuned = hv.disco_tuned_profile.stdout | default('') | trim %}
+    tuned_profile: {{ _tuned | to_json if _tuned | length > 0 else 'null' }}

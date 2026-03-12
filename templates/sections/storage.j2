@@ -1,0 +1,72 @@
+  # ===========================================================================
+  # Storage
+  # ===========================================================================
+  storage:
+    mounts:
+{% for mount in hv.ansible_mounts | default([]) %}
+      - device: "{{ mount.device }}"
+        mount: "{{ mount.mount }}"
+        fstype: "{{ mount.fstype }}"
+        size_total_bytes: {{ mount.size_total | default(0) }}
+        size_available_bytes: {{ mount.size_available | default(0) }}
+        options: "{{ mount.options | default('') }}"
+{% else %}
+      []
+{% endfor %}
+{% set _df = hv.disco_df | default('') | trim %}
+{% if _df | length > 0 %}
+    disk_usage: |
+{{ _df | indent(6, true) }}
+{% else %}
+    disk_usage: null
+{% endif %}
+{% set _lsblk = hv.disco_lsblk.stdout | default('') | trim %}
+{% if _lsblk | length > 0 %}
+    block_devices: |
+{{ _lsblk | indent(6, true) }}
+{% else %}
+    block_devices: null
+{% endif %}
+    lvm:
+{% set _pvs = hv.disco_pvs.stdout | default('') | trim %}
+{% if _pvs | length > 0 %}
+      physical_volumes: |
+{{ _pvs | indent(8, true) }}
+{% else %}
+      physical_volumes: null
+{% endif %}
+{% set _vgs = hv.disco_vgs.stdout | default('') | trim %}
+{% if _vgs | length > 0 %}
+      volume_groups: |
+{{ _vgs | indent(8, true) }}
+{% else %}
+      volume_groups: null
+{% endif %}
+{% set _lvs = hv.disco_lvs.stdout | default('') | trim %}
+{% if _lvs | length > 0 %}
+      logical_volumes: |
+{{ _lvs | indent(8, true) }}
+{% else %}
+      logical_volumes: null
+{% endif %}
+{% set _fstab = (hv.disco_fstab.content | default('') | b64decode) | trim %}
+{% if _fstab | length > 0 %}
+    fstab: |
+{{ _fstab | indent(6, true) }}
+{% else %}
+    fstab: null
+{% endif %}
+{% set _mpath = hv.disco_multipath.stdout | default('') | trim %}
+{% if _mpath | length > 0 %}
+    multipath: |
+{{ _mpath | indent(6, true) }}
+{% else %}
+    multipath: null
+{% endif %}
+{% set _nfs = hv.disco_nfs_mounts | default('') | trim %}
+{% if _nfs | length > 0 %}
+    nfs_cifs_mounts: |
+{{ _nfs | indent(6, true) }}
+{% else %}
+    nfs_cifs_mounts: null
+{% endif %}

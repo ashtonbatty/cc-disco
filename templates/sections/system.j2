@@ -1,0 +1,26 @@
+  # ===========================================================================
+  # System
+  # ===========================================================================
+  system:
+    hostname: {{ hv.ansible_hostname | default(none) | to_json }}
+    fqdn: {{ hv.ansible_fqdn | default(none) | to_json }}
+    os: {{ ((hv.ansible_distribution ~ ' ' ~ hv.ansible_distribution_version) | to_json) if hv.ansible_distribution is defined else 'null' }}
+    rhel_release: {{ hv.ansible_distribution_major_version | default(none) | to_json }}
+{% set _release_string = (hv.disco_redhat_release.content | default('') | b64decode) | trim %}
+    rhel_release_string: {{ _release_string | to_json if _release_string | length > 0 else 'null' }}
+    kernel: {{ hv.ansible_kernel | default(none) | to_json }}
+    architecture: {{ hv.ansible_architecture | default(none) | to_json }}
+    uptime_seconds: {{ hv.ansible_uptime_seconds | default(0) }}
+    uptime_days: {{ (hv.ansible_uptime_seconds | default(0) | int / 86400) | round(1) }}
+
+  # ===========================================================================
+  # CPU and Memory
+  # ===========================================================================
+  cpu:
+    model: {{ (hv.ansible_processor[2] | to_json) if hv.ansible_processor | default([]) | length > 2 else 'null' }}
+    physical_count: {{ hv.ansible_processor_count | default(0) }}
+    cores_per_socket: {{ hv.ansible_processor_cores | default(0) }}
+    total_vcpus: {{ hv.ansible_processor_vcpus | default(0) }}
+  memory:
+    total_mb: {{ hv.ansible_memtotal_mb | default(0) }}
+    swap_mb: {{ hv.ansible_swaptotal_mb | default(0) }}

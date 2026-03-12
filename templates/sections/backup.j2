@@ -1,0 +1,23 @@
+  # ===========================================================================
+  # Backup and Monitoring Agents
+  # ===========================================================================
+  agents_detected:
+{% for agent in hv.disco_backup_monitoring.stdout_lines | default([]) %}
+{% if agent | trim | length > 0 %}
+    - "{{ agent | trim }}"
+{% endif %}
+{% else %}
+    []
+{% endfor %}
+
+  # ===========================================================================
+  # Common Applications
+  # ===========================================================================
+  common_apps:
+{% for app in hv.disco_common_apps | default([]) %}
+{% if app | trim | length > 0 %}
+    - "{{ app | trim }}"
+{% endif %}
+{% else %}
+    []
+{% endfor %}

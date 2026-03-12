@@ -1,0 +1,59 @@
+---
+# Storage
+
+- name: Get LVM physical volumes
+  ansible.builtin.command: pvs --noheadings --nosuffix --units g -o pv_name,vg_name,pv_size,pv_free
+  register: disco_pvs
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Get LVM volume groups
+  ansible.builtin.command: vgs --noheadings --nosuffix --units g -o vg_name,vg_size,vg_free,lv_count,pv_count
+  register: disco_vgs
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Get LVM logical volumes
+  ansible.builtin.command: lvs --noheadings --nosuffix --units g -o lv_name,vg_name,lv_size,lv_attr
+  register: disco_lvs
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Build disk usage summary from mount facts
+  ansible.builtin.set_fact:
+    disco_df: >-
+      {%- for mount in ansible_mounts | default([]) %}
+      {{ mount.mount }}|{{ mount.fstype }}|{{ mount.device }}|{{ mount.size_total | default(0) }}|{{ mount.size_available | default(0) }}{%- endfor %}
+  tags: [storage]
+
+- name: Get block devices
+  ansible.builtin.command: lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT -n
+  register: disco_lsblk
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Get fstab
+  ansible.builtin.slurp:
+    src: /etc/fstab
+  register: disco_fstab
+  failed_when: false
+  tags: [storage]
+
+- name: Get multipath config
+  ansible.builtin.command: multipath -ll
+  register: disco_multipath
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Get NFS/CIFS mounts from mount facts
+  ansible.builtin.set_fact:
+    disco_nfs_mounts: >-
+      {%- for mount in ansible_mounts | default([]) if mount.fstype in ['nfs', 'nfs4', 'cifs', 'smbfs'] %}
+      {{ mount.mount }} {{ mount.device }} {{ mount.fstype }} {{ mount.options | default('') }}
+      {%- endfor %}
+  tags: [storage]

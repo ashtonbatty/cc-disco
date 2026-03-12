@@ -1,0 +1,63 @@
+---
+# Firewall
+
+- name: Determine firewalld state from service facts
+  ansible.builtin.set_fact:
+    disco_firewalld_active: >-
+      {{
+        ansible_facts.services['firewalld.service'].state
+        if 'firewalld.service' in (ansible_facts.services | default({}))
+        else (
+          ansible_facts.services['firewalld'].state
+          if 'firewalld' in (ansible_facts.services | default({}))
+          else 'not found'
+        )
+      }}
+  tags: [firewall]
+
+- name: Get firewalld zones and rules
+  # Zone/rich-rule dump requires firewall-cmd textual output.
+  ansible.builtin.shell: |
+    set -o pipefail
+    command -v firewall-cmd >/dev/null 2>&1 || { echo "firewall-cmd not found"; exit 0; }
+    firewall-cmd --list-all-zones 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: disco_firewalld_zones
+  changed_when: false
+  failed_when: false
+  when: disco_firewalld_active | default('') | trim | lower == 'running'
+  tags: [firewall]
+
+- name: Check if iptables service is active
+  # Mixed systemd/sysv service status fallback is required for older releases.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl is-active iptables 2>/dev/null && exit 0
+    fi
+    if command -v service >/dev/null 2>&1; then
+      service iptables status 2>/dev/null | head -1 && exit 0
+    fi
+    echo "not found"
+  args:
+    executable: /bin/bash
+  register: disco_iptables_active
+  changed_when: false
+  failed_when: false
+  tags: [firewall]
+
+- name: Get iptables rules
+  ansible.builtin.command: iptables -L -n -v
+  register: disco_iptables_rules
+  changed_when: false
+  failed_when: false
+  tags: [firewall]
+
+- name: Get nftables rules (RHEL 8+)
+  ansible.builtin.command: nft list ruleset
+  register: disco_nftables_rules
+  changed_when: false
+  failed_when: false
+  when: rhel_major | int >= 8
+  tags: [firewall]

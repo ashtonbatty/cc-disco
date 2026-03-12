@@ -1,0 +1,68 @@
+  # ===========================================================================
+  # RHEL 9/10 Migration Readiness
+  # ===========================================================================
+  migration:
+{% set _pyver = hv.disco_python_versions.stdout | default('') | trim %}
+{% if _pyver | length > 0 %}
+    python_versions: |
+{{ _pyver | indent(6, true) }}
+{% else %}
+    python_versions: null
+{% endif %}
+    packages_32bit_count: {{ (hv.disco_32bit_packages | default([])) | length }}
+{% if (hv.disco_32bit_packages | default([])) | length > 0 %}
+    packages_32bit:
+{% for pkg in hv.disco_32bit_packages | default([]) %}
+      - "{{ pkg }}"
+{% endfor %}
+{% endif %}
+    deprecated_packages:
+{% for pkg in hv.disco_deprecated_packages | default([]) %}
+      - "{{ pkg }}"
+{% else %}
+      []
+{% endfor %}
+{% set _timesvc = hv.disco_time_services | default('') | trim %}
+{% if _timesvc | length > 0 %}
+    time_service: |
+{{ _timesvc | indent(6, true) }}
+{% else %}
+    time_service: null
+{% endif %}
+    xinetd_services:
+{% for entry in hv.disco_xinetd.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | basename }}"
+{% else %}
+      []
+{% endfor %}
+{% set _legacy_net = hv.disco_legacy_network | default('') | trim %}
+    legacy_network: {{ _legacy_net | to_json if _legacy_net | length > 0 else 'null' }}
+{% set _openssl = hv.disco_openssl_version.stdout | default('') | trim %}
+    openssl_version: {{ _openssl | to_json if _openssl | length > 0 else 'null' }}
+{% set _fstab_concerns = hv.disco_fstab_concerns.stdout | default('') | trim %}
+{% if _fstab_concerns | length > 0 %}
+    fstab_concerns: |
+{{ _fstab_concerns | indent(6, true) }}
+{% else %}
+    fstab_concerns: null
+{% endif %}
+{% set _root_cron = hv.disco_root_crontab.stdout | default('') | trim %}
+{% if _root_cron | length > 0 %}
+    root_crontab: |
+{{ _root_cron | indent(6, true) }}
+{% else %}
+    root_crontab: null
+{% endif %}
+{% set _sys_cron = (hv.disco_system_crontab.content | default('') | b64decode) | trim %}
+{% if _sys_cron | length > 0 %}
+    system_crontab: |
+{{ _sys_cron | indent(6, true) }}
+{% else %}
+    system_crontab: null
+{% endif %}
+    cron_d_entries:
+{% for entry in hv.disco_cron_d.files | default([]) | sort(attribute='path') %}
+      - "{{ entry.path | basename | trim }}"
+{% else %}
+      []
+{% endfor %}

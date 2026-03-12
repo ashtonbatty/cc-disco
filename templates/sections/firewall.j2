@@ -1,0 +1,23 @@
+  # ===========================================================================
+  # Firewall
+  # ===========================================================================
+  firewall:
+{% set _fwd_active = hv.disco_firewalld_active | default('') | trim %}
+    firewalld_active: {{ _fwd_active | to_json if _fwd_active | length > 0 else 'null' }}
+{% if hv.disco_firewalld_zones is defined and hv.disco_firewalld_zones.stdout | default('') | length > 0 %}
+    firewalld_zones: |
+{{ hv.disco_firewalld_zones.stdout | indent(6, true) }}
+{% endif %}
+{% set _ipt_active = hv.disco_iptables_active.stdout | default('') | trim %}
+    iptables_active: {{ _ipt_active | to_json if _ipt_active | length > 0 else 'null' }}
+{% set _ipt_rules = hv.disco_iptables_rules.stdout | default('') | trim %}
+{% if _ipt_rules | length > 0 %}
+    iptables_rules: |
+{{ _ipt_rules | indent(6, true) }}
+{% else %}
+    iptables_rules: null
+{% endif %}
+{% if hv.disco_nftables_rules is defined and hv.disco_nftables_rules.stdout | default('') | length > 0 %}
+    nftables_rules: |
+{{ hv.disco_nftables_rules.stdout | indent(6, true) }}
+{% endif %}

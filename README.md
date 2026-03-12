@@ -101,7 +101,7 @@ ansible-playbook gather_facts.yml --limit server1.example.com
 ansible-playbook gather_facts.yml --limit rhel8
 
 # Run specific sections only
-ansible-playbook gather_facts.yml --tags selinux,network,migration
+ansible-playbook gather_facts.yml --tags selinux,network,readiness
 ```
 
 ## Output

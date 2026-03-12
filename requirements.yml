@@ -1,0 +1,4 @@
+---
+# This project only uses ansible.builtin modules.
+# Add collections here if external dependencies are introduced.
+collections: []
