@@ -13,6 +13,8 @@
 
 - name: RHEL Server Discovery and Audit
   hosts: all
+  # Full fact gathering is intentional — tasks rely on ansible_facts.packages,
+  # ansible_facts.services, and hardware facts across multiple tag sections.
   gather_facts: true
   become: true
 

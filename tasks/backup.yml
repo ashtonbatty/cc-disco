@@ -4,7 +4,6 @@
 - name: Detect backup and monitoring agents
   # Agent footprint checks are path-based heuristics and not exposed as module facts.
   ansible.builtin.shell: |
-    set -o pipefail
     [ -e /usr/openv/netbackup/bin/bpclntcmd ] && printf '%s\n' "netbackup"
     [ -d /opt/commvault ] && printf '%s\n' "commvault"
     [ -e /opt/tivoli/tsm/client/ba/bin/dsmc ] && printf '%s\n' "tsm_spectrum_protect"

@@ -52,11 +52,13 @@
 - name: Get bond details
   # Bond mode/slave details are only available in /proc/net/bonding/* text files.
   ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
+  args:
+    executable: /bin/bash
   register: disco_bond_details
   changed_when: false
   failed_when: false
   when: disco_bond_files.matched | default(0) | int > 0
-  tags: [network]
+  tags: [network, readiness]
 
 - name: Check for network teaming
   # teamdctl state data has no equivalent Ansible fact/module on RHEL 6/7/8.

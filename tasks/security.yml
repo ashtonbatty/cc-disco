@@ -21,6 +21,8 @@
   ansible.builtin.slurp:
     src: "{{ item.path }}"
   loop: "{{ disco_sudoers_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
   register: disco_sudoers_d_contents
   failed_when: false
   no_log: true
@@ -31,6 +33,7 @@
     src: /etc/ssh/sshd_config
   register: disco_sshd_config
   failed_when: false
+  no_log: true
   tags: [security]
 
 - name: Find sshd_config.d drop-ins (RHEL 8+)
@@ -47,8 +50,11 @@
   ansible.builtin.slurp:
     src: "{{ item.path }}"
   loop: "{{ disco_sshd_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
   register: disco_sshd_d_contents
   failed_when: false
+  no_log: true
   tags: [security]
 
 - name: Read key PAM configs
@@ -59,6 +65,8 @@
     - /etc/pam.d/password-auth
     - /etc/pam.d/sshd
     - /etc/pam.d/su
+  loop_control:
+    label: "{{ item }}"
   register: disco_pam_contents
   failed_when: false
   no_log: true

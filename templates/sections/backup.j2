@@ -9,15 +9,3 @@
 {% else %}
     []
 {% endfor %}
-
-  # ===========================================================================
-  # Common Applications
-  # ===========================================================================
-  common_apps:
-{% for app in hv.disco_common_apps | default([]) %}
-{% if app | trim | length > 0 %}
-    - "{{ app | trim }}"
-{% endif %}
-{% else %}
-    []
-{% endfor %}

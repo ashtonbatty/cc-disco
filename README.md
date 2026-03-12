@@ -108,6 +108,20 @@ ansible-playbook gather_facts.yml --tags selinux,network,readiness
 
 Report is written to `./output/discovery_report.yml` — a single YAML file with all hosts keyed by hostname.
 
+## Tag Dependencies
+
+Some tags share data through registered variables. When using `--tags`, include all
+tags in a dependency chain or results will be incomplete.
+
+| Producer Tag | Variable | Consumer Tag |
+|---|---|---|
+| `network` | `disco_ifcfg_files`, `disco_nm_active` | `readiness` |
+| `apps` (package_facts) | `ansible_facts.packages` | `readiness` |
+| `services` (service_facts) | `ansible_facts.services` | `network`, `firewall`, `readiness` |
+
+The pre-requisite fact-collection tasks in `gather_facts.yml` are already multi-tagged
+to cover these dependencies.
+
 ## Prerequisites
 
 - Ansible 2.9+ (2.11 for RHEL 6 targets with Python 2.6)
