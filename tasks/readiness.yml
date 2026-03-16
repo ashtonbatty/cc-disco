@@ -186,21 +186,3 @@
   failed_when: false
   when: collect_command_heavy_probes | bool
   tags: [readiness]
-
-# Common application detection
-- name: Build common server application list from package facts
-  ansible.builtin.set_fact:
-    disco_common_apps: >-
-      {%- set result = [] -%}
-      {%- set known_apps = ['httpd', 'nginx', 'mysql-server', 'mariadb-server', 'postgresql-server', 'tomcat', 'docker', 'podman'] -%}
-      {%- set pkgs = ansible_facts.packages | default({}) -%}
-      {%- for app in known_apps -%}
-        {%- if app in pkgs -%}{%- set _ = result.append(app) -%}{%- endif -%}
-      {%- endfor -%}
-      {%- for name in pkgs -%}
-        {%- if name is match('^java-.*-openjdk$|^oracle-database-preinstall.*$') and name not in result -%}
-          {%- set _ = result.append(name) -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ result }}
-  tags: [readiness, apps]

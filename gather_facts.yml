@@ -83,6 +83,8 @@
       ansible.builtin.import_tasks: tasks/filesystem.yml
     - name: Import readiness tasks
       ansible.builtin.import_tasks: tasks/readiness.yml
+    - name: Import apps tasks
+      ansible.builtin.import_tasks: tasks/apps.yml
 
 
 # ==============================================================================
