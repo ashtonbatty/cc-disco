@@ -25,7 +25,8 @@
   register: disco_third_party_modules
   changed_when: false
   failed_when: false
-  tags: [kernel]
+  when: (collect_deep_kernel | bool) and (collect_command_heavy_probes | bool)
+  tags: [kernel, deep_kernel]
 
 - name: Get date of last kernel update
   # Package install chronology for kernel NEVRAs is only available via rpm query output.
@@ -67,4 +68,5 @@
   register: disco_deprecated_modules
   changed_when: false
   failed_when: false
-  tags: [kernel]
+  when: collect_deep_kernel | bool
+  tags: [kernel, deep_kernel]

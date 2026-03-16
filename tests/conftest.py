@@ -35,6 +35,15 @@ def _basename(value):
     return os.path.basename(value)
 
 
+def _bool(value):
+    """Ansible bool filter — coerce to Python bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "yes", "1")
+    return bool(value)
+
+
 def _comment(value):
     """Ansible comment filter — wraps text in # comment lines."""
     return "\n".join(f"# {line}" for line in value.splitlines())
@@ -69,6 +78,7 @@ def jinja_env():
         keep_trailing_newline=True,
     )
     env.filters["b64decode"] = _b64decode
+    env.filters["bool"] = _bool
     env.filters["to_json"] = _to_json
     env.filters["basename"] = _basename
     env.filters["comment"] = _comment
@@ -287,6 +297,12 @@ def full_hostvars():
         "disco_system_crontab": _slurp_result("SHELL=/bin/bash\n0 * * * * root run-parts /etc/cron.hourly"),
         "disco_cron_d": _find_result(["/etc/cron.d/0hourly"]),
         "disco_common_apps": ["nginx"],
+        # Discovery controls (persisted via set_fact)
+        "disco_discovery_mode": "full",
+        "disco_collect_deep_security": True,
+        "disco_collect_deep_kernel": True,
+        "disco_collect_deep_filesystem": True,
+        "disco_collect_command_heavy_probes": True,
     }
 
 
@@ -333,6 +349,7 @@ def minimal_hostvars():
         "disco_sudoers_d_files": _find_result([]),
         "disco_sudoers_d_contents": {"results": []},
         "disco_sshd_config": _slurp_result(""),
+        "disco_sshd_d_contents": {"results": []},
         "disco_pam_contents": {"results": []},
         "disco_dmi_vendor": _slurp_result(""),
         "disco_dmi_product": _slurp_result(""),
@@ -393,6 +410,12 @@ def minimal_hostvars():
         "disco_system_crontab": _slurp_result(""),
         "disco_cron_d": _find_result([]),
         "disco_common_apps": [],
+        # Discovery controls (persisted via set_fact)
+        "disco_discovery_mode": "full",
+        "disco_collect_deep_security": True,
+        "disco_collect_deep_kernel": True,
+        "disco_collect_deep_filesystem": True,
+        "disco_collect_command_heavy_probes": True,
     }
 
 

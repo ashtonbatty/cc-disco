@@ -10,6 +10,7 @@
     loaded_modules: null
 {% endif %}
     third_party_modules:
+{% if _deep_kernel and _command_heavy %}
 {% for line in hv.disco_third_party_modules.stdout_lines | default([]) %}
 {% set parts = line.split('|') %}
       - module: {{ parts[0] | default(none) | to_json }}
@@ -18,12 +19,19 @@
 {% else %}
       []
 {% endfor %}
+{% else %}
+      []  # skipped (deep_kernel or command_heavy_probes disabled)
+{% endif %}
     deprecated_modules:
+{% if _deep_kernel %}
 {% for line in hv.disco_deprecated_modules.stdout_lines | default([]) %}
       - "{{ line.split(':')[1] | default(line) }}"
 {% else %}
       []
 {% endfor %}
+{% else %}
+      []  # skipped (collect_deep_kernel=false)
+{% endif %}
 {% set _kern_update = hv.disco_last_kernel_update.stdout | default('') | trim %}
     last_kernel_update: {{ _kern_update | to_json if _kern_update | length > 0 else 'null' }}
 {% set _grub = (hv.disco_grub_defaults.content | default('') | b64decode) | trim %}

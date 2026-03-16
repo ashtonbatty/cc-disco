@@ -10,6 +10,7 @@
     sudoers_main: null
 {% endif %}
     sudoers_drop_ins:
+{% if _deep_security %}
 {% for item in hv.disco_sudoers_d_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item.path }}"
@@ -19,6 +20,9 @@
 {% else %}
       []
 {% endfor %}
+{% else %}
+      []  # skipped (collect_deep_security=false)
+{% endif %}
 {% set _sshd = (hv.disco_sshd_config.content | default('') | b64decode) | trim %}
 {% if _sshd | length > 0 %}
     sshd_config: |
@@ -26,8 +30,8 @@
 {% else %}
     sshd_config: null
 {% endif %}
-{% if hv.disco_sshd_d_contents is defined %}
     sshd_config_drop_ins:
+{% if _deep_security %}
 {% for item in hv.disco_sshd_d_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item.path }}"
@@ -37,8 +41,11 @@
 {% else %}
       []
 {% endfor %}
+{% else %}
+      []  # skipped (collect_deep_security=false)
 {% endif %}
     pam:
+{% if _deep_security %}
 {% for item in hv.disco_pam_contents.results | default([]) %}
 {% if item.content is defined %}
       - file: "{{ item.item }}"
@@ -48,5 +55,8 @@
 {% else %}
       []
 {% endfor %}
+{% else %}
+      []  # skipped (collect_deep_security=false)
+{% endif %}
 {% set _crypto = (hv.disco_crypto_policy | default({})).stdout | default('') | trim %}
     crypto_policy: {{ _crypto | to_json if _crypto | length > 0 else 'null' }}

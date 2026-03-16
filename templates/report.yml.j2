@@ -20,8 +20,35 @@
 
 {% for host in (report_hosts | default(groups['all'] | difference(['localhost']))) | sort %}
 {% set hv = hostvars[host] %}
+{% set _deep_security = hv.disco_collect_deep_security | default(true) | bool %}
+{% set _deep_kernel = hv.disco_collect_deep_kernel | default(true) | bool %}
+{% set _deep_filesystem = hv.disco_collect_deep_filesystem | default(true) | bool %}
+{% set _command_heavy = hv.disco_collect_command_heavy_probes | default(true) | bool %}
 {% if hv.ansible_hostname is defined %}
 {{ host }}:
+
+  discovery_controls:
+    mode: {{ hv.disco_discovery_mode | default('full') | to_json }}
+    collect_deep_security: {{ _deep_security }}
+    collect_deep_kernel: {{ _deep_kernel }}
+    collect_deep_filesystem: {{ _deep_filesystem }}
+    collect_command_heavy_probes: {{ _command_heavy }}
+    omitted_sections:
+{% if not _deep_security %}
+      - deep_security
+{% endif %}
+{% if not _deep_kernel %}
+      - deep_kernel
+{% endif %}
+{% if not _deep_filesystem %}
+      - deep_filesystem
+{% endif %}
+{% if not _command_heavy %}
+      - command_heavy_probes
+{% endif %}
+{% if _deep_security and _deep_kernel and _deep_filesystem and _command_heavy %}
+      []
+{% endif %}
 
 {% include 'sections/system.j2' %}
 
