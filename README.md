@@ -90,23 +90,67 @@ Ansible playbook to gather server facts from RHEL 6/7/8 hosts for upgrade/modern
 # Edit inventory with your hosts
 vim inventory/hosts.yml
 
-# Run against all hosts
+# Full discovery (default)
 ansible-playbook gather_facts.yml
+
+# Lightweight discovery mode (skips deep_* and command-heavy probes)
+ansible-playbook gather_facts.yml -e disco_mode=lightweight
 
 # Run against a specific group or host
 ansible-playbook gather_facts.yml --limit rhel8
 ansible-playbook gather_facts.yml --limit server1.example.com
 
-# Report generation still runs during --limit executions; no need to include localhost in --limit
-ansible-playbook gather_facts.yml --limit rhel8
-
 # Run specific sections only
 ansible-playbook gather_facts.yml --tags selinux,network,readiness
+
+# Run only expensive deep sections when needed
+ansible-playbook gather_facts.yml --tags deep_kernel
+ansible-playbook gather_facts.yml --tags deep_filesystem
+ansible-playbook gather_facts.yml --tags deep_security
+
+# Override individual performance knobs
+ansible-playbook gather_facts.yml -e disco_collect_deep_kernel=false
+ansible-playbook gather_facts.yml -e disco_collect_command_heavy_probes=false
 ```
 
 ## Output
 
 Report is written to `./output/discovery_report.yml` — a single YAML file with all hosts keyed by hostname.
+
+## Performance Controls
+
+The playbook supports runtime knobs to reduce expensive probes in large estates:
+
+- `disco_mode` (`full` or `lightweight`) controls default behavior.
+- `disco_collect_deep_security` toggles deep sudoers.d/sshd_config.d/PAM collection.
+- `disco_collect_deep_kernel` toggles deep kernel module analysis.
+- `disco_collect_deep_filesystem` toggles broad filesystem exploration.
+- `disco_collect_command_heavy_probes` toggles command-heavy package/app/migration probes.
+
+When a knob disables a section, the generated report marks it as **skipped** so omissions are distinguished from probe failures.
+
+## Tag Dependencies
+
+Some tags share data through registered variables. When using `--tags`, include all
+tags in a dependency chain or results will be incomplete.
+
+| Producer Tag | Variable | Consumer Tag |
+|---|---|---|
+| `network` | `disco_ifcfg_files`, `disco_nm_active` | `readiness` |
+| `apps` (package_facts) | `ansible_facts.packages` | `readiness` |
+| `services` (service_facts) | `ansible_facts.services` | `network`, `firewall`, `readiness` |
+
+The pre-requisite fact-collection tasks in `gather_facts.yml` are already multi-tagged
+to cover these dependencies.
+
+## Fork Tuning
+
+`ansible.cfg` defaults to `forks = 25` for a safer baseline across mixed RHEL 6/7/8 estates.
+
+```bash
+# Override per run
+ANSIBLE_FORKS=50 ansible-playbook gather_facts.yml
+```
 
 ## Prerequisites
 

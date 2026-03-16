@@ -8,18 +8,38 @@
 #   ansible-playbook gather_facts.yml
 #   ansible-playbook gather_facts.yml --limit rhel8
 #   ansible-playbook gather_facts.yml --tags selinux,network
+#   ansible-playbook gather_facts.yml -e disco_mode=lightweight
+#   ansible-playbook gather_facts.yml --tags deep_kernel
 #
 # Output: ./output/discovery_report.yml
 
 - name: RHEL Server Discovery and Audit
   hosts: all
+  # Full fact gathering is intentional — tasks rely on ansible_facts.packages,
+  # ansible_facts.services, and hardware facts across multiple tag sections.
   gather_facts: true
   become: true
 
   vars:
     rhel_major: "{{ ansible_distribution_major_version }}"
+    discovery_mode: "{{ disco_mode | default('full') }}"
+    collect_deep_kernel: "{{ disco_collect_deep_kernel | default(discovery_mode != 'lightweight') | bool }}"
+    collect_deep_filesystem: "{{ disco_collect_deep_filesystem | default(discovery_mode != 'lightweight') | bool }}"
+    collect_deep_security: "{{ disco_collect_deep_security | default(discovery_mode != 'lightweight') | bool }}"
+    collect_command_heavy_probes: "{{ disco_collect_command_heavy_probes | default(discovery_mode != 'lightweight') | bool }}"
 
   tasks:
+
+    # Persist discovery controls into host facts so the report play can read
+    # them from hostvars (play-level vars are not automatically available there).
+    - name: Persist discovery controls as host facts
+      ansible.builtin.set_fact:
+        disco_discovery_mode: "{{ discovery_mode }}"
+        disco_collect_deep_kernel: "{{ collect_deep_kernel }}"
+        disco_collect_deep_filesystem: "{{ collect_deep_filesystem }}"
+        disco_collect_deep_security: "{{ collect_deep_security }}"
+        disco_collect_command_heavy_probes: "{{ collect_command_heavy_probes }}"
+      tags: [always]
 
     # Pre-requisite fact collection — tagged for all sections that depend on them
     - name: Collect package facts for structured package analysis

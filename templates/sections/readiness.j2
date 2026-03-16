@@ -2,6 +2,7 @@
   # RHEL 9/10 Migration Readiness
   # ===========================================================================
   migration:
+{% if _command_heavy %}
 {% set _pyver = hv.disco_python_versions.stdout | default('') | trim %}
 {% if _pyver | length > 0 %}
     python_versions: |
@@ -66,3 +67,21 @@
 {% else %}
       []
 {% endfor %}
+{% else %}
+    skipped: true  # collect_command_heavy_probes=false
+{% endif %}
+  # ===========================================================================
+  # Common Applications
+  # ===========================================================================
+  common_apps:
+{% if _command_heavy %}
+{% for app in hv.disco_common_apps | default([]) %}
+{% if app | trim | length > 0 %}
+    - "{{ app | trim }}"
+{% endif %}
+{% else %}
+    []
+{% endfor %}
+{% else %}
+    []  # skipped (collect_command_heavy_probes=false)
+{% endif %}

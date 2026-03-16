@@ -52,6 +52,8 @@
 - name: Get bond details
   # Bond mode/slave details are only available in /proc/net/bonding/* text files.
   ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
+  args:
+    executable: /bin/bash
   register: disco_bond_details
   changed_when: false
   failed_when: false
@@ -83,4 +85,4 @@
     file_type: file
   register: disco_ifcfg_files
   failed_when: false
-  tags: [network]
+  tags: [network, readiness]

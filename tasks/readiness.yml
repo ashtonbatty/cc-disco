@@ -30,6 +30,7 @@
   register: disco_python_versions
   changed_when: false
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Build 32-bit package list from package facts
@@ -44,6 +45,7 @@
         {%- endfor -%}
       {%- endfor -%}
       {{ result }}
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Build deprecated package list from package facts
@@ -52,6 +54,7 @@
       {{ ['ntp', 'sendmail', 'vsftpd', 'xinetd', 'talk', 'ypserv', 'ypbind', 'iptables-services', 'net-tools']
          | select('in', ansible_facts.packages | default({}))
          | list }}
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Build chronyd vs ntpd status from service facts
@@ -75,6 +78,7 @@
           else 'not found'
         )
       }}
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Check for xinetd services
@@ -84,11 +88,13 @@
     recurse: false
   register: disco_xinetd
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Check legacy network config vs NetworkManager
   ansible.builtin.set_fact:
     disco_legacy_network: "ifcfg_count:{{ disco_ifcfg_files.matched | default(0) }},nm_status:{{ disco_nm_active | default('unknown') }}"
+  when: collect_command_heavy_probes | bool
   tags: [readiness, network]
 
 - name: Check for NFS/CIFS fstab entries and deprecated mount options
@@ -102,6 +108,7 @@
   register: disco_fstab_concerns
   changed_when: false
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Get OpenSSL version
@@ -109,6 +116,7 @@
   register: disco_openssl_version
   changed_when: false
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Get root crontab
@@ -116,6 +124,7 @@
   register: disco_root_crontab
   changed_when: false
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Get system crontab
@@ -123,6 +132,7 @@
     src: /etc/crontab
   register: disco_system_crontab
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: List cron.d entries
@@ -132,6 +142,7 @@
     recurse: false
   register: disco_cron_d
   failed_when: false
+  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 # Common application detection
@@ -150,4 +161,5 @@
         {%- endif -%}
       {%- endfor -%}
       {{ result }}
+  when: collect_command_heavy_probes | bool
   tags: [readiness, apps]
