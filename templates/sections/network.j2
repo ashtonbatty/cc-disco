@@ -28,6 +28,13 @@
 {% else %}
       []
 {% endfor %}
+{% set _resolv = (hv.disco_resolv_conf.content | default('') | b64decode) | trim %}
+{% if _resolv | length > 0 %}
+    resolv_conf: |
+{{ _resolv | indent(6, true) }}
+{% else %}
+    resolv_conf: null
+{% endif %}
     interfaces:
 {% for iface in hv.ansible_interfaces | default([]) | sort %}
 {% set iface_key = 'ansible_' + iface | replace('-', '_') | replace('.', '_') %}

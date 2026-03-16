@@ -43,7 +43,7 @@
     path: /sys/firmware/efi
   register: disco_efi_dir
   failed_when: false
-  tags: [kernel]
+  tags: [kernel, platform]
 
 - name: Get GRUB defaults
   ansible.builtin.slurp:

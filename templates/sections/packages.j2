@@ -4,7 +4,6 @@
   packages:
     total_count: {{ hv.disco_pkg_count | default(0) | trim }}
     non_redhat_packages:
-{% if _command_heavy %}
 {% for line in hv.disco_non_rh_packages | default([]) %}
 {% set parts = line.split('|') %}
       - name: {{ parts[0] | default(none) | to_json }}
@@ -13,9 +12,6 @@
 {% else %}
       []
 {% endfor %}
-{% else %}
-      []  # skipped (collect_command_heavy_probes=false)
-{% endif %}
 {% set _vlocks = hv.disco_versionlocks.stdout | default('') | trim %}
 {% if _vlocks | length > 0 %}
     versionlocks: |

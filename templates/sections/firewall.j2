@@ -7,6 +7,8 @@
 {% if hv.disco_firewalld_zones is defined and hv.disco_firewalld_zones.stdout | default('') | length > 0 %}
     firewalld_zones: |
 {{ hv.disco_firewalld_zones.stdout | indent(6, true) }}
+{% else %}
+    firewalld_zones: null
 {% endif %}
 {% set _ipt_active = hv.disco_iptables_active.stdout | default('') | trim %}
     iptables_active: {{ _ipt_active | to_json if _ipt_active | length > 0 else 'null' }}
@@ -20,4 +22,6 @@
 {% if hv.disco_nftables_rules is defined and hv.disco_nftables_rules.stdout | default('') | length > 0 %}
     nftables_rules: |
 {{ hv.disco_nftables_rules.stdout | indent(6, true) }}
+{% else %}
+    nftables_rules: null
 {% endif %}

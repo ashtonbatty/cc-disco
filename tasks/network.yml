@@ -27,7 +27,7 @@
           else 'not found'
         )
       }}
-  tags: [network]
+  tags: [network, readiness]
 
 - name: Get NetworkManager connection profiles
   ansible.builtin.command: nmcli -t connection show

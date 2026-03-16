@@ -4,7 +4,7 @@
 - name: Detect init system
   ansible.builtin.set_fact:
     disco_init_system: "{{ 'systemd' if ansible_service_mgr | default('') == 'systemd' else 'sysvinit' }}"
-  tags: [services]
+  tags: [services, platform]
 
 - name: Build enabled and running service lists from service facts
   ansible.builtin.set_fact:

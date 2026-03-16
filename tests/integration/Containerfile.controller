@@ -12,8 +12,11 @@ RUN yum install -y python3 python3-pip openssh-clients sshpass && \
 RUN pip3 install --no-cache-dir --upgrade pip setuptools && \
     pip3 install --no-cache-dir 'ansible-core>=2.11,<2.12' pyyaml
 
-# Create ansible user
-RUN useradd -m ansible
+# Create ansible user and pre-create the output volume mount point so Docker
+# initialises the named volume with the correct ownership on first use.
+RUN useradd -m ansible && \
+    mkdir -p /home/ansible/playbook/output && \
+    chown ansible:ansible /home/ansible/playbook/output
 USER ansible
 WORKDIR /home/ansible
 

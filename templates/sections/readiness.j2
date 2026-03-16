@@ -2,14 +2,6 @@
   # RHEL 9/10 Migration Readiness
   # ===========================================================================
   migration:
-{% if _command_heavy %}
-{% set _pyver = hv.disco_python_versions.stdout | default('') | trim %}
-{% if _pyver | length > 0 %}
-    python_versions: |
-{{ _pyver | indent(6, true) }}
-{% else %}
-    python_versions: null
-{% endif %}
     packages_32bit_count: {{ (hv.disco_32bit_packages | default([])) | length }}
 {% if (hv.disco_32bit_packages | default([])) | length > 0 %}
     packages_32bit:
@@ -23,6 +15,14 @@
 {% else %}
       []
 {% endfor %}
+{% if _command_heavy %}
+{% set _pyver = hv.disco_python_versions.stdout | default('') | trim %}
+{% if _pyver | length > 0 %}
+    python_versions: |
+{{ _pyver | indent(6, true) }}
+{% else %}
+    python_versions: null
+{% endif %}
 {% set _timesvc = hv.disco_time_services | default('') | trim %}
 {% if _timesvc | length > 0 %}
     time_service: |
@@ -67,14 +67,11 @@
 {% else %}
       []
 {% endfor %}
-{% else %}
-    skipped: true  # collect_command_heavy_probes=false
 {% endif %}
   # ===========================================================================
   # Common Applications
   # ===========================================================================
   common_apps:
-{% if _command_heavy %}
 {% for app in hv.disco_common_apps | default([]) %}
 {% if app | trim | length > 0 %}
     - "{{ app | trim }}"
@@ -82,6 +79,3 @@
 {% else %}
     []
 {% endfor %}
-{% else %}
-    []  # skipped (collect_command_heavy_probes=false)
-{% endif %}
