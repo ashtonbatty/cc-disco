@@ -88,6 +88,8 @@ class TestNullConvention:
             ("satellite", "katello_packages"),
             ("migration", "python_versions"),
             ("migration", "openssl_version"),
+            ("migration", "java_active_version"),
+            ("migration", "alternatives"),
         ]
         for section, field in null_scalars:
             value = host.get(section, {}).get(field, "MISSING")
@@ -113,6 +115,7 @@ class TestFieldTypes:
         ("kernel", "deprecated_modules"),
         ("packages", "non_redhat_packages"),
         ("migration", "deprecated_packages"),
+        ("migration", "java_packages"),
         ("migration", "xinetd_services"),
         ("migration", "cron_d_entries"),
     }

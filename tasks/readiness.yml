@@ -117,6 +117,50 @@
   when: collect_command_heavy_probes | bool
   tags: [readiness]
 
+- name: Get active Java version
+  ansible.builtin.command: java -version
+  register: disco_java_active
+  changed_when: false
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: Build installed Java package list from package facts
+  ansible.builtin.set_fact:
+    disco_java_packages: >-
+      {%- set result = [] -%}
+      {%- for name, versions in (ansible_facts.packages | default({})).items() -%}
+        {%- if name is match('^java-.*-(openjdk|oracle|ibm|corretto|zulu|temurin).*$') -%}
+          {%- for v in versions -%}
+            {%- set _ = result.append(name ~ '-' ~ v.version ~ '-' ~ v.release ~ '.' ~ v.arch) -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result }}
+  tags: [readiness]
+
+- name: Get alternatives entries
+  # alternatives --list is not available on RHEL 6; fall back to directory listing.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if alternatives --list 2>/dev/null; then
+      exit 0
+    fi
+    # RHEL 6 fallback: parse /var/lib/alternatives directory entries
+    for alt in /var/lib/alternatives/*; do
+      [ -f "$alt" ] || continue
+      name=$(basename "$alt")
+      current=$(head -1 "$alt" 2>/dev/null)
+      printf '%s\t%s\t%s\n' "$name" "auto" "$current"
+    done
+  args:
+    executable: /bin/bash
+  register: disco_alternatives
+  changed_when: false
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
 - name: Get root crontab
   ansible.builtin.command: crontab -l
   register: disco_root_crontab

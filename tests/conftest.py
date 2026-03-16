@@ -92,11 +92,13 @@ def jinja_env():
 # Helper to build Ansible-shaped registered variable dicts
 # ---------------------------------------------------------------------------
 
-def _cmd_result(stdout="", rc=0):
+def _cmd_result(stdout="", rc=0, stderr=""):
     """Build a dict shaped like an Ansible registered command result."""
     return {
         "stdout": stdout,
         "stdout_lines": stdout.splitlines() if stdout else [],
+        "stderr": stderr,
+        "stderr_lines": stderr.splitlines() if stderr else [],
         "rc": rc,
         "changed": False,
     }
@@ -295,6 +297,9 @@ def full_hostvars():
         "disco_legacy_network": "ifcfg_count:1,nm_status:running",
         "disco_fstab_concerns": _cmd_result(""),
         "disco_openssl_version": _cmd_result("OpenSSL 1.1.1k  FIPS 25 Mar 2021"),
+        "disco_java_active": _cmd_result("", stderr="openjdk version \"1.8.0_362\"\nOpenJDK Runtime Environment (build 1.8.0_362-b09)"),
+        "disco_java_packages": ["java-1.8.0-openjdk-1.8.0.362.b09-4.el8.x86_64"],
+        "disco_alternatives": _cmd_result("java\tauto\t/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.362.b09-4.el8.x86_64/jre/bin/java\njavac\tauto\t/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.362.b09-4.el8.x86_64/bin/javac"),
         "disco_root_crontab": _cmd_result("0 2 * * * /usr/local/bin/backup.sh"),
         "disco_system_crontab": _slurp_result("SHELL=/bin/bash\n0 * * * * root run-parts /etc/cron.hourly"),
         "disco_cron_d": _find_result(["/etc/cron.d/0hourly"]),
@@ -410,6 +415,9 @@ def minimal_hostvars():
         "disco_legacy_network": "",
         "disco_fstab_concerns": _cmd_result(""),
         "disco_openssl_version": _cmd_result(""),
+        "disco_java_active": _cmd_result(""),
+        "disco_java_packages": [],
+        "disco_alternatives": _cmd_result(""),
         "disco_root_crontab": _cmd_result(""),
         "disco_system_crontab": _slurp_result(""),
         "disco_cron_d": _find_result([]),

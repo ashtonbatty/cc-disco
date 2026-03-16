@@ -15,6 +15,12 @@
 {% else %}
       []
 {% endfor %}
+    java_packages:
+{% for pkg in hv.disco_java_packages | default([]) %}
+      - "{{ pkg }}"
+{% else %}
+      []
+{% endfor %}
 {% if _command_heavy %}
 {% set _pyver = hv.disco_python_versions.stdout | default('') | trim %}
 {% if _pyver | length > 0 %}
@@ -40,6 +46,15 @@
     legacy_network: {{ _legacy_net | to_json if _legacy_net | length > 0 else 'null' }}
 {% set _openssl = hv.disco_openssl_version.stdout | default('') | trim %}
     openssl_version: {{ _openssl | to_json if _openssl | length > 0 else 'null' }}
+{% set _java_ver = (hv.disco_java_active.stderr | default('') ~ hv.disco_java_active.stdout | default('')) | trim %}
+    java_active_version: {{ _java_ver | to_json if _java_ver | length > 0 else 'null' }}
+{% set _alts = hv.disco_alternatives.stdout | default('') | trim %}
+{% if _alts | length > 0 %}
+    alternatives: |
+{{ _alts | indent(6, true) }}
+{% else %}
+    alternatives: null
+{% endif %}
 {% set _fstab_concerns = hv.disco_fstab_concerns.stdout | default('') | trim %}
 {% if _fstab_concerns | length > 0 %}
     fstab_concerns: |
