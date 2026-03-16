@@ -55,7 +55,7 @@ def integration_report():
     output_dir = REPO_ROOT / "tests" / "integration" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    subprocess.run(
+    cp_result = subprocess.run(
         [
             "docker", "cp",
             "integration-controller-1:/home/ansible/playbook/output/discovery_report.yml",
@@ -63,6 +63,7 @@ def integration_report():
         ],
         cwd=REPO_ROOT,
         capture_output=True,
+        text=True,
     )
 
     if result.returncode != 0:
@@ -72,6 +73,11 @@ def integration_report():
         pytest.fail(
             f"Container stack exited with code {result.returncode}.\n"
             f"Last 40 lines:\n{tail}"
+        )
+
+    if cp_result.returncode != 0:
+        pytest.fail(
+            f"docker cp failed (rc={cp_result.returncode}): {cp_result.stderr}"
         )
 
     assert REPORT_PATH.exists(), f"Report not found at {REPORT_PATH}"
@@ -154,7 +160,7 @@ class TestEl7Webserver:
 
     def test_uptime_is_positive(self, el7_web):
         assert el7_web["system"]["uptime_seconds"] > 0
-        assert el7_web["system"]["uptime_days"] > 0
+        assert el7_web["system"]["uptime_days"] >= 0
 
     # --- CPU / Memory ---
     def test_cpu_fields(self, el7_web):
