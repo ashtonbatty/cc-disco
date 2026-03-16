@@ -55,10 +55,25 @@ def integration_report():
     output_dir = REPO_ROOT / "tests" / "integration" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Resolve the controller container ID dynamically — the name depends on
+    # the Docker Compose project name which varies by directory and version.
+    # Use -qa (all, including stopped) since the container has already exited.
+    id_result = subprocess.run(
+        ["docker-compose", "-f", str(COMPOSE_FILE), "ps", "-qa", "controller"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    container_id = id_result.stdout.strip()
+    if not container_id:
+        pytest.fail(
+            f"Could not resolve controller container ID: {id_result.stderr}"
+        )
+
     cp_result = subprocess.run(
         [
             "docker", "cp",
-            "integration-controller-1:/home/ansible/playbook/output/discovery_report.yml",
+            f"{container_id}:/home/ansible/playbook/output/discovery_report.yml",
             str(REPORT_PATH),
         ],
         cwd=REPO_ROOT,

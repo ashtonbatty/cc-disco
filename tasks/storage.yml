@@ -24,7 +24,7 @@
 
 - name: Build disk usage summary from mount facts
   ansible.builtin.set_fact:
-    disco_df: >-
+    disco_df: |-
       {%- for mount in ansible_mounts | default([]) %}
       {{ mount.mount }}|{{ mount.fstype }}|{{ mount.device }}|{{ mount.size_total | default(0) }}|{{ mount.size_available | default(0) }}{%- endfor %}
   tags: [storage]
@@ -52,7 +52,7 @@
 
 - name: Get NFS/CIFS mounts from mount facts
   ansible.builtin.set_fact:
-    disco_nfs_mounts: >-
+    disco_nfs_mounts: |-
       {%- for mount in ansible_mounts | default([]) if mount.fstype in ['nfs', 'nfs4', 'cifs', 'smbfs'] %}
       {{ mount.mount }} {{ mount.device }} {{ mount.fstype }} {{ mount.options | default('') }}
       {%- endfor %}

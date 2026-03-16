@@ -2,3 +2,5 @@
 profile: production
 skip_list:
   - yaml[line-length]  # discovery Jinja2 expressions are inherently wide
+exclude_paths:
+  - tests/integration/output/  # generated report, not source

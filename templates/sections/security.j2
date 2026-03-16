@@ -11,12 +11,10 @@
 {% endif %}
     sudoers_drop_ins:
 {% if _deep_security %}
-{% for item in hv.disco_sudoers_d_contents.results | default([]) %}
-{% if item.content is defined %}
+{% for item in hv.disco_sudoers_d_contents.results | default([]) | selectattr('content', 'defined') | list %}
       - file: "{{ item.item.path }}"
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
 {% else %}
       []
 {% endfor %}
@@ -32,12 +30,10 @@
 {% endif %}
     sshd_config_drop_ins:
 {% if _deep_security %}
-{% for item in hv.disco_sshd_d_contents.results | default([]) %}
-{% if item.content is defined %}
+{% for item in hv.disco_sshd_d_contents.results | default([]) | selectattr('content', 'defined') | list %}
       - file: "{{ item.item.path }}"
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
 {% else %}
       []
 {% endfor %}
@@ -46,12 +42,10 @@
 {% endif %}
     pam:
 {% if _deep_security %}
-{% for item in hv.disco_pam_contents.results | default([]) %}
-{% if item.content is defined %}
+{% for item in hv.disco_pam_contents.results | default([]) | selectattr('content', 'defined') | list %}
       - file: "{{ item.item }}"
         content: |
 {{ (item.content | b64decode) | indent(10, true) }}
-{% endif %}
 {% else %}
       []
 {% endfor %}

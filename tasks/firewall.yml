@@ -32,12 +32,17 @@
 - name: Check if iptables service is active
   # Mixed systemd/sysv service status fallback is required for older releases.
   ansible.builtin.shell: |
-    set -o pipefail
     if command -v systemctl >/dev/null 2>&1; then
-      systemctl is-active iptables 2>/dev/null && exit 0
+      systemctl is-active iptables 2>/dev/null || true
+      exit 0
     fi
     if command -v service >/dev/null 2>&1; then
-      service iptables status 2>/dev/null | head -1 && exit 0
+      if service iptables status >/dev/null 2>&1; then
+        echo "active"
+      else
+        echo "inactive"
+      fi
+      exit 0
     fi
     echo "not found"
   args:

@@ -51,7 +51,11 @@
 
 - name: Get bond details
   # Bond mode/slave details are only available in /proc/net/bonding/* text files.
-  ansible.builtin.shell: cat /proc/net/bonding/* 2>/dev/null
+  ansible.builtin.shell: |
+    for f in /proc/net/bonding/*; do
+      echo "=== $(basename "$f") ==="
+      cat "$f"
+    done
   args:
     executable: /bin/bash
   register: disco_bond_details
