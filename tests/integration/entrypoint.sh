@@ -1,14 +1,16 @@
 #!/bin/bash
-# Controller entrypoint: wait for targets, run playbook, validate report.
+# Controller entrypoint: wait for targets, run the playbook with both
+# ansible-core controllers, then validate the exported facts.
 set -euo pipefail
 
 cd /home/ansible/playbook
+INVENTORY_DIR=tests/integration/inventory
 
 echo "=== Waiting for target hosts to be reachable ==="
-for host in el7-webserver el7-minimal el6-legacy; do
+for host in el6-legacy el7-webserver el7-minimal el9-inventory el10-inventory ubuntu2404-inventory; do
     for i in $(seq 1 30); do
         if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no \
-               -i /home/ansible/.ssh/id_rsa \
+               -i /home/ansible/.ssh/id_ecdsa \
                ansible@"$host" true 2>/dev/null; then
             echo "  $host: reachable"
             break
@@ -21,17 +23,20 @@ for host in el7-webserver el7-minimal el6-legacy; do
     done
 done
 
-echo ""
-echo "=== Running discovery playbook ==="
-# Override stdout_callback — ansible-core 2.11 doesn't ship the yaml callback
-ANSIBLE_STDOUT_CALLBACK=default ansible-playbook \
-    -i inventory/hosts.yml \
-    gather_facts.yml \
-    -v
+# ansible-core 2.11 doesn't ship the yaml result format; use the plain default callback.
+export ANSIBLE_STDOUT_CALLBACK=default
 
 echo ""
-echo "=== Validating report ==="
-python3 validate.py output/discovery_report.yml
+echo "=== Running discovery playbook (ansible-core 2.11: EL6) ==="
+/opt/ansible-2.11/bin/ansible-playbook -i "$INVENTORY_DIR/legacy.yml" gather_facts.yml -v
+
+echo ""
+echo "=== Running discovery playbook (ansible-core 2.16: EL7, EL9, EL10, Ubuntu) ==="
+/opt/ansible-2.16/bin/ansible-playbook -i "$INVENTORY_DIR/modern.yml" gather_facts.yml -v
+
+echo ""
+echo "=== Validating exported facts ==="
+/opt/ansible-2.16/bin/python tests/integration/validate.py output/facts
 
 echo ""
 echo "=== Integration tests PASSED ==="

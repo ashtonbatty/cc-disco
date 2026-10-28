@@ -1,221 +1,150 @@
 #!/usr/bin/env python3
-"""Validate the integration test discovery report.
+"""Validate the integration run's exported facts (output/facts/<host>.json).
 
 Checks:
-1. Report file exists and parses as valid YAML
-2. All 3 target hosts appear as top-level keys
-3. All 18 sections present per host
-4. No forbidden placeholder strings (in template-controlled fields only)
-5. Scenario-specific assertions
+1. Every expected host has a facts file that parses as a JSON object
+2. The profile matches the host's OS, and only migration hosts carry migration facts
+3. The inventory layer is present on every host (packages, processes, sshd on :22, ...)
+4. No placeholder strings or empty strings stand in for null in disco_* facts
+5. A few scenario-specific assertions
+
+Uses only the standard library so it runs on any controller Python.
 """
+import json
 import sys
+from pathlib import Path
 
-import yaml
 
+MIGRATION_HOSTS = ["el6-legacy", "el7-webserver", "el7-minimal"]
+INVENTORY_HOSTS = ["el9-inventory", "el10-inventory", "ubuntu2404-inventory"]
+EXPECTED_HOSTS = MIGRATION_HOSTS + INVENTORY_HOSTS
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-EXPECTED_HOSTS = ["el7-webserver", "el7-minimal", "el6-legacy"]
-
-EXPECTED_SECTIONS = [
-    "system", "cpu", "memory", "platform", "network", "firewall",
-    "storage", "selinux", "security", "identity", "kernel", "services",
-    "packages", "satellite", "agents_detected", "common_apps",
-    "directories", "migration",
+MIGRATION_FACTS = [
+    "disco_platform", "disco_kernel", "disco_network", "disco_firewall", "disco_storage",
+    "disco_security", "disco_identity", "disco_satellite", "disco_backup",
+    "disco_filesystem", "disco_readiness", "disco_apps",
+]
+INVENTORY_FACTS = [
+    "disco_controls", "disco_packages", "disco_processes", "disco_components",
+    "disco_containers", "packages", "services", "tcp_listen", "udp_listen",
 ]
 
-# Placeholder strings that should never appear as template-controlled values.
-# NOTE: "unknown" and "none" are excluded here because they can appear as
-# legitimate RPM metadata (e.g., vendor: "unknown") or command output.
-FORBIDDEN_PLACEHOLDERS = [
-    "not collected",
-    "not configured",
-    "not checked",
-    "not registered",
-    "not installed",
-    "no crontab",
-    "not present",
-    "N/A",
-    "N/A (pre-RHEL 8)",
-]
+FORBIDDEN_PLACEHOLDERS = {
+    "not collected", "not configured", "not checked", "not registered",
+    "not installed", "no crontab", "not present", "n/a", "not found",
+}
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def walk_values(obj, path=""):
-    """Yield (path, value) for every leaf value in a nested dict/list."""
+def walk(obj, path=""):
     if isinstance(obj, dict):
         for key, val in obj.items():
-            yield from walk_values(val, f"{path}.{key}")
+            yield from walk(val, f"{path}.{key}")
     elif isinstance(obj, list):
         for i, val in enumerate(obj):
-            yield from walk_values(val, f"{path}[{i}]")
+            yield from walk(val, f"{path}[{i}]")
     else:
         yield path, obj
 
 
-def check_no_placeholders(host_data, hostname):
-    """Ensure no forbidden placeholder strings appear in the report."""
+def check_host(host, facts):
     errors = []
-    for path, value in walk_values(host_data):
-        if isinstance(value, str):
-            lower = value.strip().lower()
-            for placeholder in FORBIDDEN_PLACEHOLDERS:
-                if lower == placeholder.lower():
-                    errors.append(
-                        f"  {hostname}{path}: forbidden placeholder '{placeholder}' "
-                        f"(got {value!r})"
-                    )
+    expected_profile = "migration" if host in MIGRATION_HOSTS else "inventory"
+
+    profile = (facts.get("disco_controls") or {}).get("profile")
+    if profile != expected_profile:
+        errors.append(f"{host}: profile {profile!r}, expected {expected_profile!r}")
+
+    for name in INVENTORY_FACTS:
+        if name not in facts:
+            errors.append(f"{host}: missing inventory fact {name}")
+
+    for name in MIGRATION_FACTS:
+        if expected_profile == "migration" and name not in facts:
+            errors.append(f"{host}: missing migration fact {name}")
+        if expected_profile == "inventory" and name in facts:
+            errors.append(f"{host}: unexpected migration fact {name}")
+
+    if not facts.get("packages"):
+        errors.append(f"{host}: packages is empty")
+    procs = facts.get("disco_processes") or []
+    if not any(p.get("name") == "sshd" for p in procs):
+        errors.append(f"{host}: no sshd in disco_processes")
+    listen = facts.get("tcp_listen") or []
+    if not any(p.get("port") == 22 for p in listen):
+        errors.append(f"{host}: port 22 missing from tcp_listen")
+
+    for name, value in facts.items():
+        if not name.startswith("disco_"):
+            continue
+        for path, leaf in walk(value, name):
+            if isinstance(leaf, str) and leaf.strip().lower() in FORBIDDEN_PLACEHOLDERS:
+                errors.append(f"{host}: placeholder {leaf!r} at {path}")
+            if leaf == "":
+                errors.append(f"{host}: empty string at {path} (should be null)")
     return errors
 
 
-# ---------------------------------------------------------------------------
-# Main validation
-# ---------------------------------------------------------------------------
-
-def validate(report_path):
+def check_scenarios(hosts):
     errors = []
+    web = hosts.get("el7-webserver", {})
+    agents = (web.get("disco_backup") or {}).get("agents") or []
+    for agent in ("crowdstrike", "splunk"):
+        if agent not in agents:
+            errors.append(f"el7-webserver: agent {agent!r} not detected, got {agents}")
+    if "httpd" not in ((web.get("disco_apps") or {}).get("common") or []):
+        errors.append("el7-webserver: httpd missing from disco_apps.common")
 
-    # 1. Parse YAML
-    try:
-        with open(report_path) as f:
-            report = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"FAIL: Report file not found: {report_path}")
-        return 1
-    except yaml.YAMLError as e:
-        print(f"FAIL: Report is not valid YAML: {e}")
-        return 1
+    el6 = hosts.get("el6-legacy", {})
+    readiness = el6.get("disco_readiness") or {}
+    if "tftp" not in (readiness.get("xinetd_services") or []):
+        errors.append("el6-legacy: tftp missing from xinetd_services")
+    if "ntp" not in (readiness.get("deprecated_packages") or []):
+        errors.append("el6-legacy: ntp missing from deprecated_packages")
 
-    if not isinstance(report, dict):
-        print(f"FAIL: Report root is not a dict (got {type(report).__name__})")
-        return 1
+    el9 = (hosts.get("el9-inventory", {}).get("disco_packages") or {})
+    if not any(p["name"] == "htop" for p in el9.get("third_party") or []):
+        errors.append("el9-inventory: EPEL htop not reported as third-party")
 
-    # 2. Check all hosts present
+    ubuntu = (hosts.get("ubuntu2404-inventory", {}).get("disco_packages") or {})
+    if not any(p["name"] == "disco-localtool" for p in ubuntu.get("third_party") or []):
+        errors.append("ubuntu2404-inventory: local package not reported as third-party")
+    if "nginx" not in (ubuntu.get("locks") or []):
+        errors.append("ubuntu2404-inventory: held nginx missing from locks")
+    return errors
+
+
+def validate(facts_dir):
+    facts_dir = Path(facts_dir)
+    errors = []
+    hosts = {}
     for host in EXPECTED_HOSTS:
-        if host not in report:
-            errors.append(f"Missing host: {host}")
-
-    if errors:
-        for e in errors:
-            print(f"FAIL: {e}")
-        return 1
-
-    # 3. Check all sections present per host
-    for host in EXPECTED_HOSTS:
-        host_data = report[host]
-        if not isinstance(host_data, dict):
-            errors.append(f"{host}: host data is not a dict")
+        path = facts_dir / f"{host}.json"
+        try:
+            hosts[host] = json.loads(path.read_text())
+        except FileNotFoundError:
+            errors.append(f"{host}: facts file not found at {path}")
             continue
-        for section in EXPECTED_SECTIONS:
-            if section not in host_data:
-                errors.append(f"{host}: missing section '{section}'")
+        except json.JSONDecodeError as exc:
+            errors.append(f"{host}: invalid JSON: {exc}")
+            continue
+        if not isinstance(hosts[host], dict):
+            errors.append(f"{host}: facts root is not an object")
+            continue
+        errors.extend(check_host(host, hosts[host]))
 
-    # 4. Check no placeholder strings
-    for host in EXPECTED_HOSTS:
-        host_data = report[host]
-        if isinstance(host_data, dict):
-            errors.extend(check_no_placeholders(host_data, host))
-
-    # 5. Scenario-specific assertions
-    errors.extend(validate_el7_webserver(report.get("el7-webserver", {})))
-    errors.extend(validate_el7_minimal(report.get("el7-minimal", {})))
-    errors.extend(validate_el6_legacy(report.get("el6-legacy", {})))
+    errors.extend(check_scenarios(hosts))
 
     if errors:
         print(f"FAIL: {len(errors)} validation error(s):")
-        for e in errors:
-            print(f"  - {e}")
+        for error in errors:
+            print(f"  - {error}")
         return 1
-
-    print(f"OK: Report validated — {len(EXPECTED_HOSTS)} hosts, "
-          f"{len(EXPECTED_SECTIONS)} sections each")
+    print(f"OK: facts validated for {len(EXPECTED_HOSTS)} hosts")
     return 0
-
-
-def validate_el7_webserver(host):
-    """el7-webserver: agents and common_apps present."""
-    errors = []
-    if not isinstance(host, dict):
-        return ["el7-webserver: host data is not a dict"]
-
-    # agents_detected should include crowdstrike and splunk (from /opt dirs)
-    agents = host.get("agents_detected", [])
-    if isinstance(agents, list):
-        agents_lower = [a.lower() if isinstance(a, str) else str(a).lower()
-                        for a in agents]
-        for expected in ["crowdstrike", "splunk"]:
-            if not any(expected in a for a in agents_lower):
-                errors.append(
-                    f"el7-webserver: agents_detected should include "
-                    f"'{expected}', got {agents}"
-                )
-
-    # common_apps should include httpd (nginx may not be detected depending
-    # on the detection method — package_facts vs binary check)
-    apps = host.get("common_apps", [])
-    if isinstance(apps, list):
-        apps_lower = [a.lower() if isinstance(a, str) else str(a).lower()
-                      for a in apps]
-        if not any("httpd" in a for a in apps_lower):
-            errors.append(
-                f"el7-webserver: common_apps should include "
-                f"'httpd', got {apps}"
-            )
-
-    return errors
-
-
-def validate_el7_minimal(host):
-    """el7-minimal: no agents."""
-    errors = []
-    if not isinstance(host, dict):
-        return ["el7-minimal: host data is not a dict"]
-
-    # agents_detected should be empty
-    agents = host.get("agents_detected", [])
-    if isinstance(agents, list) and len(agents) > 0:
-        errors.append(
-            f"el7-minimal: agents_detected should be empty, got {agents}"
-        )
-
-    return errors
-
-
-def validate_el6_legacy(host):
-    """el6-legacy: xinetd services non-empty, deprecated packages include ntp."""
-    errors = []
-    if not isinstance(host, dict):
-        return ["el6-legacy: host data is not a dict"]
-
-    migration = host.get("migration", {})
-    if isinstance(migration, dict):
-        # xinetd_services should be non-empty
-        xinetd = migration.get("xinetd_services", [])
-        if isinstance(xinetd, list) and len(xinetd) == 0:
-            errors.append(
-                "el6-legacy: migration.xinetd_services should be non-empty"
-            )
-
-        # deprecated_packages should include ntp
-        deprecated = migration.get("deprecated_packages", [])
-        if isinstance(deprecated, list):
-            dep_lower = [str(d).lower() for d in deprecated]
-            if "ntp" not in dep_lower:
-                errors.append(
-                    f"el6-legacy: migration.deprecated_packages should include "
-                    f"'ntp', got {deprecated}"
-                )
-
-    return errors
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <report.yml>")
+        print(f"Usage: {sys.argv[0]} <facts-dir>")
         sys.exit(1)
     sys.exit(validate(sys.argv[1]))

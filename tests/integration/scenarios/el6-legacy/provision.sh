@@ -7,8 +7,9 @@ FILES=/tmp/provision-files
 
 # --- Packages ---
 yum install -y \
-    xinetd ntp iptables cronie net-tools \
-    && yum clean all
+    xinetd ntp iptables cronie net-tools
+# Separate command: set -e ignores a failure on the left of &&.
+yum clean all
 
 # --- xinetd config ---
 cp "$FILES/tftp-xinetd" /etc/xinetd.d/tftp

@@ -1,0 +1,12 @@
+---
+# Hosts run by the ansible-core 2.11 controller (Python 2.6 targets).
+all:
+  children:
+    rhel6:
+      hosts:
+        el6-legacy:
+          ansible_python_interpreter: /usr/bin/python
+  vars:
+    ansible_user: ansible
+    ansible_ssh_private_key_file: /home/ansible/.ssh/id_ecdsa
+    ansible_port: 22

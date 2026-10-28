@@ -1,11 +1,12 @@
 FROM centos:6
 
-# CentOS 6 repos are archived — point to vault
+# CentOS 6 repos are archived. vault.centos.org now answers 403 to plain-HTTP
+# yum, so use the kernel.org mirror of the vault.
 RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo && \
-    sed -i 's|^#\s*baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+    sed -i 's|^#\s*baseurl=http://mirror.centos.org/centos/$releasever|baseurl=http://archive.kernel.org/centos-vault/6.10|g' /etc/yum.repos.d/CentOS-Base.repo
 
-# Install sshd and basic tools
-RUN yum install -y openssh-server sudo python && \
+# Install sshd and basic tools (ps and ss are probed by the inventory layer)
+RUN yum install -y openssh-server sudo python procps iproute && \
     yum clean all
 
 # Create ansible user with sudo
@@ -13,9 +14,11 @@ RUN useradd -m ansible && \
     echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible && \
     chmod 0440 /etc/sudoers.d/ansible
 
-# Generate SSH host keys
-RUN ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" && \
-    ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ""
+# Generate SSH host keys. ECDSA first, matching production RHEL 6.5+ hosts;
+# modern OpenSSH clients reject the SHA-1 ssh-rsa/ssh-dss host keys.
+RUN ssh-keygen -t ecdsa -b 256 -f /etc/ssh/ssh_host_ecdsa_key -N "" && \
+    ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" && \
+    printf 'HostKey /etc/ssh/ssh_host_ecdsa_key\nHostKey /etc/ssh/ssh_host_rsa_key\n' >> /etc/ssh/sshd_config
 
 # Configure sshd
 RUN sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
@@ -27,7 +30,7 @@ RUN sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && 
 
 # Install SSH public key
 RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh
-COPY tests/integration/ssh-keys/id_rsa.pub /home/ansible/.ssh/authorized_keys
+COPY tests/integration/ssh-keys/id_ecdsa.pub /home/ansible/.ssh/authorized_keys
 RUN chmod 600 /home/ansible/.ssh/authorized_keys && \
     chown -R ansible:ansible /home/ansible/.ssh
 

@@ -10,8 +10,9 @@ yum install -y \
     httpd nginx firewalld \
     sssd krb5-workstation \
     cronie \
-    net-tools \
-    && yum clean all
+    net-tools
+# Separate command: set -e ignores a failure on the left of &&.
+yum clean all
 
 # --- SSSD / Kerberos ---
 cp "$FILES/sssd.conf" /etc/sssd/sssd.conf
