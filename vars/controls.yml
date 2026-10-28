@@ -52,3 +52,18 @@ disco_os_vendor_pattern: "{{ disco_os_vendor_patterns[ansible_facts.distribution
 
 # apt package origins that belong to the OS vendor.
 disco_os_apt_origins: [Ubuntu, Debian]
+
+# --- Batched probes (migration layer) ----------------------------------------
+
+# Each migration section runs all its commands in one shell task: one round trip
+# per section instead of one per command. Every command prints one line,
+# name|rc|base64(output), which the disco_probes filter (filter_plugins/) turns
+# back into {name: {rc, stdout, stdout_lines}}.
+#   probe NAME CMD...         run CMD (stderr dropped) and record its rc and output
+#   probe_ls NAME DIR GLOB T  list DIR/GLOB entries passing `test T` (-f / -d),
+#                             symlinks excluded; a missing DIR is collected and empty
+#   emit NAME RC TEXT         record a value directly
+disco_probe_sh: |
+  emit() { printf '%s|%s|%s\n' "$1" "$2" "$(printf '%s' "$3" | base64 | tr -d '\n')"; }
+  probe() { local n=$1 o; shift; o=$("$@" 2>/dev/null); emit "$n" $? "$o"; }
+  probe_ls() { local f o; o=$(for f in "$2"/$3; do [ ! -L "$f" ] && [ "$4" "$f" ] && printf '%s\n' "$f"; done); emit "$1" 0 "$o"; }

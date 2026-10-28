@@ -1,73 +1,47 @@
 ---
 # RHEL 9/10 Migration Readiness
 #
-# Package-derived lists use ansible_facts.packages (tag: packages); fstab concerns
-# use the fstab read by storage.yml (tag: storage). Interpreter, OpenSSL and Java
-# versions are in disco_components; time-service and NetworkManager state are in
-# ansible_facts.services.
+# Package-derived lists use ansible_facts.packages (tag: packages). Interpreter,
+# OpenSSL and Java versions are in disco_components; time-service and
+# NetworkManager state are in ansible_facts.services. All probes run in one task
+# (see disco_probe_sh in vars/controls.yml); it reads fstab itself, so
+# --tags readiness needs nothing from the storage section.
 
-- name: Check for xinetd services
-  ansible.builtin.find:
-    paths: /etc/xinetd.d
-    file_type: file
-    recurse: false
-  register: disco_xinetd
-  failed_when: false
-  when: collect_command_heavy_probes | bool
-  tags: [readiness]
-
-- name: Get alternatives entries
-  # alternatives --list is not available on RHEL 6; fall back to directory listing.
+- name: Probe fstab, xinetd, alternatives and cron
   ansible.builtin.shell: |
     set -o pipefail
-    if alternatives --list 2>/dev/null; then
-      exit 0
+    {{ disco_probe_sh }}
+    # alternatives --list is not available on RHEL 6; fall back to its state directory.
+    alternatives_list() {
+      alternatives --list 2>/dev/null && return 0
+      for alt in /var/lib/alternatives/*; do
+        [ -f "$alt" ] || continue
+        printf '%s\t%s\t%s\n' "$(basename "$alt")" "auto" "$(head -1 "$alt" 2>/dev/null)"
+      done
+    }
+    probe fstab cat /etc/fstab
+    if [ -n "$DISCO_HEAVY" ]; then
+      probe_ls xinetd /etc/xinetd.d '*' -f
+      probe alternatives alternatives_list
+      probe root_crontab crontab -l
+      probe system_crontab cat /etc/crontab
+      probe_ls cron_d /etc/cron.d '*' -f
     fi
-    # RHEL 6 fallback: parse /var/lib/alternatives directory entries
-    for alt in /var/lib/alternatives/*; do
-      [ -f "$alt" ] || continue
-      name=$(basename "$alt")
-      current=$(head -1 "$alt" 2>/dev/null)
-      printf '%s\t%s\t%s\n' "$name" "auto" "$current"
-    done
+    exit 0
   args:
     executable: /bin/bash
-  register: disco_alternatives
+  environment:
+    DISCO_HEAVY: "{{ 'yes' if collect_command_heavy_probes | bool else '' }}"
+  register: disco_readiness_probes
   changed_when: false
   failed_when: false
-  when: collect_command_heavy_probes | bool
-  tags: [readiness]
-
-- name: Get root crontab
-  ansible.builtin.command: crontab -l
-  register: disco_root_crontab
-  changed_when: false
-  failed_when: false
-  when: collect_command_heavy_probes | bool
-  tags: [readiness]
-
-- name: Get system crontab
-  ansible.builtin.slurp:
-    src: /etc/crontab
-  register: disco_system_crontab
-  failed_when: false
-  when: collect_command_heavy_probes | bool
-  tags: [readiness]
-
-- name: List cron.d entries
-  ansible.builtin.find:
-    paths: /etc/cron.d
-    file_type: file
-    recurse: false
-  register: disco_cron_d
-  failed_when: false
-  when: collect_command_heavy_probes | bool
   tags: [readiness]
 
 - name: Publish migration readiness facts
   ansible.builtin.set_fact:
     cacheable: true
     disco_readiness: >-
+      {%- set p = disco_readiness_probes | disco_probes -%}
       {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {%- set have_pkgs = pkgs | length > 0 -%}
       {%- set pkg32 = [] -%}
@@ -81,23 +55,20 @@
       {%- endfor -%}
       {%- set deprecated = ['ntp', 'sendmail', 'vsftpd', 'xinetd', 'talk', 'ypserv', 'ypbind', 'iptables-services', 'net-tools']
            | select('in', pkgs) | list -%}
-      {%- set fstab = disco_fstab.content | default('') | b64decode -%}
-      {%- set fstab_concerns = fstab.splitlines() | map('trim') | reject('match', '#')
+      {%- set fstab_concerns = (p.fstab.stdout_lines | default([])) | map('trim') | reject('match', '#')
            | select('search', 'nfs|cifs|ext[23]|_netdev') | list -%}
-      {%- set alts = disco_alternatives.stdout | default('') | trim -%}
-      {%- set root_cron = disco_root_crontab.stdout | default('') | trim -%}
-      {%- set sys_cron = disco_system_crontab.content | default('') | b64decode | trim -%}
+      {%- set alts = p.alternatives.stdout | default('') | trim -%}
+      {%- set root_cron = p.root_crontab.stdout | default('') | trim -%}
+      {%- set sys_cron = p.system_crontab.stdout | default('') | trim -%}
       {{ {
            'packages_32bit': pkg32 if have_pkgs else none,
            'deprecated_packages': deprecated if have_pkgs else none,
            'java_packages': java if have_pkgs else none,
-           'fstab_concerns': fstab_concerns if disco_fstab is disco_collected else none,
-           'xinetd_services': (disco_xinetd.files | map(attribute='path') | map('basename') | sort)
-             if disco_xinetd is disco_collected else none,
-           'alternatives': alts if disco_alternatives is disco_collected and alts else none,
-           'root_crontab': root_cron if disco_root_crontab is disco_collected and root_cron else none,
-           'system_crontab': sys_cron if disco_system_crontab is disco_collected and sys_cron else none,
-           'cron_d_entries': (disco_cron_d.files | map(attribute='path') | map('basename') | sort)
-             if disco_cron_d is disco_collected else none,
+           'fstab_concerns': fstab_concerns if p.fstab is disco_collected else none,
+           'xinetd_services': (p.xinetd.stdout_lines | map('basename') | sort) if p.xinetd is disco_collected else none,
+           'alternatives': alts if p.alternatives is disco_collected and alts else none,
+           'root_crontab': root_cron if p.root_crontab is disco_collected and root_cron else none,
+           'system_crontab': sys_cron if p.system_crontab is disco_collected and sys_cron else none,
+           'cron_d_entries': (p.cron_d.stdout_lines | map('basename') | sort) if p.cron_d is disco_collected else none,
          } }}
   tags: [readiness]

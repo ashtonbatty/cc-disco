@@ -43,7 +43,7 @@ class TestTaggedPlaybookBehavior:
     def test_readiness_tag_includes_producers(self):
         output = _list_tasks("readiness")
         assert "Collect installed package facts" in output
-        assert "Get fstab" in output
+        assert "Probe fstab, xinetd, alternatives and cron" in output
         assert "Publish migration readiness facts" in output
 
     def test_apps_and_satellite_tags_include_package_facts(self):

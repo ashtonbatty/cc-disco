@@ -3,48 +3,37 @@
 #
 # setup already reports the running kernel (ansible_kernel) and its command line
 # (ansible_cmdline). This adds loaded modules, GRUB defaults and the tuned profile.
+# All probes run in one task (see disco_probe_sh in vars/controls.yml).
 
-- name: Get loaded kernel modules
-  ansible.builtin.command: lsmod
-  register: disco_lsmod
-  changed_when: false
-  failed_when: false
-  tags: [kernel, deep_kernel]
-
-- name: Detect third-party kernel modules
-  # Module author/filepath correlation is not exposed by Ansible facts.
+- name: Probe kernel modules, GRUB defaults and tuned profile
   ansible.builtin.shell: |
     set -o pipefail
-    for mod in $(lsmod | awk 'NR>1{print $1}'); do
-      info=$(modinfo "$mod" 2>/dev/null)
-      filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
-      # No filename means modinfo can't place the module, so it can't be classified.
-      if [ -n "$filename" ] && echo "$filename" | grep -qv '/kernel/'; then
-        author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
-        echo "${mod}|${filename}|${author}"
-      fi
-    done
+    {{ disco_probe_sh }}
+    # Module author/filepath correlation is not exposed by Ansible facts.
+    third_party_modules() {
+      for mod in $(lsmod | awk 'NR>1{print $1}'); do
+        info=$(modinfo "$mod" 2>/dev/null)
+        filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
+        # No filename means modinfo cannot place the module, so it cannot be classified.
+        if [ -n "$filename" ] && echo "$filename" | grep -qv '/kernel/'; then
+          author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
+          echo "${mod}|${filename}|${author}"
+        fi
+      done
+    }
+    probe lsmod lsmod
+    [ -n "$DISCO_DEEP" ] && probe third_party_modules third_party_modules
+    probe grub cat /etc/default/grub
+    probe tuned tuned-adm active
+    exit 0
   args:
     executable: /bin/bash
-  register: disco_third_party_modules
+  environment:
+    DISCO_DEEP: "{{ 'yes' if collect_deep_kernel | bool and collect_command_heavy_probes | bool else '' }}"
+  register: disco_kernel_probes
   changed_when: false
   failed_when: false
-  when: (collect_deep_kernel | bool) and (collect_command_heavy_probes | bool)
   tags: [kernel, deep_kernel]
-
-- name: Get GRUB defaults
-  ansible.builtin.slurp:
-    src: /etc/default/grub
-  register: disco_grub_defaults
-  failed_when: false
-  tags: [kernel]
-
-- name: Get tuned profile
-  ansible.builtin.command: tuned-adm active
-  register: disco_tuned_profile
-  changed_when: false
-  failed_when: false
-  tags: [kernel]
 
 - name: Publish kernel facts
   # Deprecated modules: loaded modules that RHEL 9/10 no longer ship. lsmod
@@ -52,8 +41,9 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_kernel: >-
+      {%- set p = disco_kernel_probes | disco_probes -%}
       {%- set third_party = [] -%}
-      {%- for line in disco_third_party_modules.stdout_lines | default([]) -%}
+      {%- for line in p.third_party_modules.stdout_lines | default([]) -%}
         {%- set f = line.split('|') -%}
         {%- set _ = third_party.append({
               'module': f[0],
@@ -61,17 +51,17 @@
               'author': (f[2] | default('')) or none,
             }) -%}
       {%- endfor -%}
-      {%- set loaded = (disco_lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
-           if disco_lsmod is disco_collected else none -%}
+      {%- set loaded = (p.lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
+           if p.lsmod is disco_collected else none -%}
       {%- set deprecated = ['floppy', 'mptbase', 'mptscsih', 'mptspi', 'megaraid', 'aacraid', '3w_9xxx', '3w_sas'] -%}
-      {%- set grub = disco_grub_defaults.content | default('') | b64decode | trim -%}
-      {%- set tuned = disco_tuned_profile.stdout | default('') | regex_replace('^Current active profile:\\s*', '') | trim -%}
+      {%- set grub = p.grub.stdout | default('') | trim -%}
+      {%- set tuned = p.tuned.stdout | default('') | regex_replace('^Current active profile:\\s*', '') | trim -%}
       {{ {
            'loaded_modules': loaded,
-           'third_party_modules': third_party if disco_third_party_modules is disco_collected else none,
+           'third_party_modules': third_party if p.third_party_modules is disco_collected else none,
            'deprecated_modules': (deprecated | select('in', loaded) | list)
              if loaded is not none and collect_deep_kernel | bool else none,
-           'grub_defaults': grub if disco_grub_defaults is disco_collected and grub else none,
-           'tuned_profile': tuned if disco_tuned_profile is disco_collected and tuned else none,
+           'grub_defaults': grub if p.grub is disco_collected and grub else none,
+           'tuned_profile': tuned if p.tuned is disco_collected and tuned else none,
          } }}
   tags: [kernel, deep_kernel]

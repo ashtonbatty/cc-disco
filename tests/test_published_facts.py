@@ -7,8 +7,8 @@ lists are always lists, and no English placeholders or empty strings stand in fo
 import pytest
 
 from conftest import (
-    TASKS_DIR, assert_no_placeholders, cmd, controls_vars, evaluate, find, loop_results, missing_cmd,
-    publish, skipped, slurp, slurp_missing, stat, uri,
+    TASKS_DIR, assert_no_placeholders, cmd, controls_vars, evaluate, missing_cmd,
+    probes, publish, skipped, stat, uri,
 )
 
 
@@ -28,16 +28,12 @@ def _ctx(facts, extra=None, **registered):
     (missing_cmd(), False),
     (skipped(), False),
     (None, False),
-    (slurp("x"), True),
-    (slurp(""), True),
-    (slurp_missing(), False),
-    (find([]), True),
+    ({"failed": False, "msg": "stat failed"}, False),
     ({"failed": False, "msg": "/data was skipped as it does not exist"}, False),
     (stat(False), True),
     (uri(-1), True),
     ({"output": []}, True),
-    (loop_results([]), True),
-    ({"results": [], "skipped": True}, False),
+    ({"services": []}, True),
 ])
 def test_disco_collected(result, expected):
     assert evaluate("r is disco_collected", {"r": result}) is expected
@@ -328,96 +324,112 @@ def test_containers_runtime_with_none_running():
 # Migration layer
 # ---------------------------------------------------------------------------
 
-FULL_MIGRATION = {
-    "disco_efi_dir": stat(True),
-    "disco_ec2_check": skipped(),
-    "disco_azure_check": skipped(),
-    "disco_lsmod": cmd("Module                  Size  Used by\nvmw_balloon            20480  0\nfloppy  1  0"),
-    "disco_third_party_modules": cmd("vmw_balloon|/lib/modules/extra/vmw_balloon.ko|VMware, Inc."),
-    "disco_grub_defaults": slurp("GRUB_TIMEOUT=5\nGRUB_DEFAULT=saved"),
-    "disco_tuned_profile": cmd("Current active profile: virtual-guest"),
-    "disco_routes": cmd("default via 10.0.1.1 dev eth0\n10.0.1.0/24 dev eth0 proto kernel"),
-    "disco_nmcli_connections": cmd("eth0:uuid1:802-3-ethernet:eth0"),
-    "disco_team_details": cmd(""),
-    "disco_ifcfg_files": find(["/etc/sysconfig/network-scripts/ifcfg-eth0"]),
-    "disco_firewalld_zones": cmd("public (active)\n  services: ssh"),
-    "disco_iptables_rules": cmd("Chain INPUT (policy ACCEPT)"),
-    "disco_nftables_rules": cmd(""),
-    "disco_fstab": slurp("/dev/sda1 / xfs defaults 0 0\n# nfs comment\nnas:/export /mnt/nas nfs defaults,_netdev 0 0"),
-    "disco_multipath": cmd("", rc=1),
-    "disco_sudoers_main": slurp("root ALL=(ALL) ALL"),
-    "disco_sudoers_d_files": find(["/etc/sudoers.d/admins"]),
-    "disco_sudoers_d_contents": loop_results([({"path": "/etc/sudoers.d/admins"}, "%admins ALL=(ALL) NOPASSWD: ALL")]),
-    "disco_sshd_config": slurp("PermitRootLogin no"),
-    "disco_sshd_d_files": find([]),
-    "disco_sshd_d_contents": loop_results([]),
-    "disco_pam_contents": loop_results([("/etc/pam.d/system-auth", "auth required pam_env.so"), ("/etc/pam.d/su", None)]),
-    "disco_crypto_policy": cmd("DEFAULT"),
-    "disco_sssd_conf": slurp("[domain/example.com]\nldap_default_authtok = s3cret\nid_provider = ldap"),
-    "disco_realm_list": cmd("example.com\n  type: kerberos"),
-    "disco_krb5_conf": slurp("[libdefaults]\ndefault_realm = EXAMPLE.COM"),
-    "disco_krb5_keytab": stat(True),
-    "disco_nsswitch_conf": slurp("passwd: files sss"),
-    "disco_sub_identity": cmd("system identity: 12345"),
-    "disco_sub_status": cmd("Overall Status: Current"),
-    "disco_satellite_server": cmd("hostname = satellite.example.com\nbaseurl = https://satellite.example.com/pulp/repos"),
-    "disco_non_satellite_repos": cmd(""),
-    "disco_backup_monitoring": cmd("crowdstrike\nsplunk"),
-    "disco_opt_listing": find(["/opt/splunkforwarder", "/opt/CrowdStrike"]),
-    "disco_data_listing": find([]),
-    "disco_third_party_paths": cmd("=== /usr/local/bin ===\ncustom-tool"),
-    "disco_xinetd": find([]),
-    "disco_alternatives": cmd("java\tauto\t/usr/lib/jvm/jre/bin/java"),
-    "disco_root_crontab": cmd("0 2 * * * /usr/local/bin/backup.sh"),
-    "disco_system_crontab": slurp("SHELL=/bin/bash"),
-    "disco_cron_d": find(["/etc/cron.d/0hourly"]),
+# Batched probe output per migration section: name -> output, or (rc, output).
+FULL_PROBES = {
+    "kernel": {
+        "lsmod": "Module                  Size  Used by\nvmw_balloon            20480  0\nfloppy  1  0",
+        "third_party_modules": "vmw_balloon|/lib/modules/extra/vmw_balloon.ko|VMware, Inc.",
+        "grub": "GRUB_TIMEOUT=5\nGRUB_DEFAULT=saved",
+        "tuned": "Current active profile: virtual-guest",
+    },
+    "network": {
+        "routes": "default via 10.0.1.1 dev eth0\n10.0.1.0/24 dev eth0 proto kernel",
+        "nmcli": "eth0:uuid1:802-3-ethernet:eth0",
+        "teaming": "",
+        "ifcfg": "/etc/sysconfig/network-scripts/ifcfg-eth0",
+    },
+    "firewall": {
+        "firewalld": "public (active)\n  services: ssh",
+        "iptables": "Chain INPUT (policy ACCEPT)",
+        "nftables": "",
+    },
+    "storage": {
+        "fstab": "/dev/sda1 / xfs defaults 0 0\n# nfs comment\nnas:/export /mnt/nas nfs defaults,_netdev 0 0",
+        "multipath": (1, ""),
+    },
+    "security": {
+        "sudoers": "root ALL=(ALL) ALL",
+        "sshd_config": "PermitRootLogin no",
+        "sudoers_d": "",
+        "sudoers_d:/etc/sudoers.d/admins": "%admins ALL=(ALL) NOPASSWD: ALL",
+        "sshd_d": "",
+        "pam": "",
+        "pam:/etc/pam.d/system-auth": "auth required pam_env.so",
+        "pam:/etc/pam.d/su": (1, ""),
+        "crypto_policy": "DEFAULT",
+    },
+    "identity": {
+        "sssd": "[domain/example.com]\nldap_default_authtok = s3cret\nid_provider = ldap",
+        "realm": "example.com\n  type: kerberos",
+        "krb5": "[libdefaults]\ndefault_realm = EXAMPLE.COM",
+        "keytab": "true",
+        "nsswitch": "passwd: files sss",
+    },
+    "satellite": {
+        "identity": "system identity: 12345",
+        "status": "Overall Status: Current",
+        "rhsm": "hostname = satellite.example.com\nbaseurl = https://satellite.example.com/pulp/repos",
+        "non_satellite_repos": "",
+    },
+    "filesystem": {
+        "opt": "/opt/splunkforwarder\n/opt/CrowdStrike",
+        "data": "",
+        "third_party_paths": "=== /usr/local/bin ===\ncustom-tool",
+    },
+    "readiness": {
+        "fstab": "/dev/sda1 / xfs defaults 0 0\n# nfs comment\nnas:/export /mnt/nas nfs defaults,_netdev 0 0",
+        "xinetd": "",
+        "alternatives": "java\tauto\t/usr/lib/jvm/jre/bin/java",
+        "root_crontab": "0 2 * * * /usr/local/bin/backup.sh",
+        "system_crontab": "SHELL=/bin/bash",
+        "cron_d": "/etc/cron.d/0hourly",
+    },
 }
 
-# Every probe ran and found nothing (or the source was missing).
-EMPTY_MIGRATION = {
-    "disco_efi_dir": stat(False),
-    "disco_ec2_check": uri(-1),
-    "disco_azure_check": uri(-1),
-    "disco_lsmod": cmd(""),
-    "disco_third_party_modules": cmd(""),
-    "disco_grub_defaults": slurp_missing(),
-    "disco_tuned_profile": missing_cmd(),
-    "disco_routes": cmd(""),
-    "disco_nmcli_connections": missing_cmd(),
-    "disco_team_details": cmd(""),
-    "disco_ifcfg_files": find([]),
-    "disco_firewalld_zones": skipped(),
-    "disco_iptables_rules": missing_cmd(),
-    "disco_nftables_rules": skipped(),
-    "disco_fstab": slurp_missing(),
-    "disco_multipath": missing_cmd(),
-    "disco_sudoers_main": slurp(""),
-    "disco_sudoers_d_files": find([]),
-    "disco_sudoers_d_contents": loop_results([]),
-    "disco_sshd_config": slurp(""),
-    "disco_sshd_d_files": find([]),
-    "disco_sshd_d_contents": loop_results([]),
-    "disco_pam_contents": loop_results([]),
-    "disco_crypto_policy": skipped(),
-    "disco_sssd_conf": slurp_missing(),
-    "disco_realm_list": missing_cmd(),
-    "disco_krb5_conf": slurp(""),
-    "disco_krb5_keytab": stat(False),
-    "disco_nsswitch_conf": slurp(""),
-    "disco_sub_identity": cmd("This system is not yet registered.", rc=1),
-    "disco_sub_status": missing_cmd(),
-    "disco_satellite_server": cmd("", rc=2),
-    "disco_non_satellite_repos": cmd(""),
-    "disco_backup_monitoring": cmd(""),
-    "disco_opt_listing": find([]),
-    "disco_data_listing": find([]),
-    "disco_third_party_paths": cmd(""),
-    "disco_xinetd": find([]),
-    "disco_alternatives": cmd(""),
-    "disco_root_crontab": cmd("", rc=1, stderr="no crontab for root"),
-    "disco_system_crontab": slurp(""),
-    "disco_cron_d": find([]),
+# Every probe ran and found nothing (or the source was missing). Absent names didn't run.
+EMPTY_PROBES = {
+    "kernel": {"lsmod": "", "third_party_modules": "", "grub": (1, ""), "tuned": (127, "")},
+    "network": {"routes": "", "nmcli": (127, ""), "teaming": "", "ifcfg": ""},
+    "firewall": {"iptables": (127, "")},
+    "storage": {"fstab": (1, ""), "multipath": (127, "")},
+    "security": {"sudoers": "", "sshd_config": "", "sudoers_d": "", "sshd_d": "", "pam": ""},
+    "identity": {"sssd": (1, ""), "realm": (127, ""), "krb5": "", "keytab": "false", "nsswitch": ""},
+    "satellite": {
+        "identity": (1, "This system is not yet registered."), "status": (127, ""),
+        "rhsm": (2, ""), "non_satellite_repos": "",
+    },
+    "filesystem": {"opt": "", "data": "", "third_party_paths": ""},
+    "readiness": {
+        "fstab": (1, ""), "xinetd": "", "alternatives": "", "root_crontab": (1, ""),
+        "system_crontab": "", "cron_d": "",
+    },
 }
+
+
+def _registers(probe_sets, **registered):
+    """Registers for a migration run: one batched probe register per section, plus overrides."""
+    regs = {f"disco_{section}_probes": probes(entries) for section, entries in probe_sets.items()}
+    return {**regs, **registered}
+
+
+def _without(probe_sets, **names):
+    """probe_sets with the given names dropped per section (probes that didn't run)."""
+    return {
+        section: {k: v for k, v in entries.items() if k.split(":")[0] not in names.get(section, ())}
+        for section, entries in probe_sets.items()
+    }
+
+
+FULL_MIGRATION = _registers(
+    FULL_PROBES,
+    disco_efi_dir=stat(True), disco_ec2_check=skipped(), disco_azure_check=skipped(),
+    disco_backup_monitoring=cmd("crowdstrike\nsplunk"),
+)
+EMPTY_MIGRATION = _registers(
+    EMPTY_PROBES,
+    disco_efi_dir=stat(False), disco_ec2_check=uri(-1), disco_azure_check=uri(-1),
+    disco_backup_monitoring=cmd(""),
+)
 
 MIGRATION_FILES = sorted(p.stem for p in (TASKS_DIR / "migration").glob("*.yml"))
 
@@ -496,13 +508,18 @@ def test_migration_empty_uses_null_and_empty_lists(rhel8_facts):
 
 
 def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
-    registered = dict(FULL_MIGRATION)
-    for name in ("disco_third_party_modules", "disco_non_satellite_repos", "disco_sudoers_d_files",
-                 "disco_sshd_d_files", "disco_pam_contents",
-                 "disco_backup_monitoring", "disco_opt_listing", "disco_data_listing", "disco_third_party_paths",
-                 "disco_xinetd", "disco_alternatives", "disco_root_crontab", "disco_system_crontab", "disco_cron_d"):
-        registered[name] = skipped()
-    registered["disco_sudoers_d_contents"] = {"results": [], "skipped": True}
+    lightweight = _without(
+        FULL_PROBES,
+        kernel=["third_party_modules"], satellite=["non_satellite_repos"],
+        security=["sudoers_d", "sshd_d", "pam"],
+        readiness=["xinetd", "alternatives", "root_crontab", "system_crontab", "cron_d"],
+    )
+    del lightweight["filesystem"]
+    registered = _registers(
+        lightweight,
+        disco_efi_dir=stat(True), disco_ec2_check=skipped(), disco_azure_check=skipped(),
+        disco_backup_monitoring=skipped(), disco_filesystem_probes=skipped(),
+    )
     f = _migration(rhel8_facts, registered, {"disco_mode": "lightweight"})
     assert f["disco_kernel"]["third_party_modules"] is None
     assert f["disco_kernel"]["deprecated_modules"] is None
@@ -650,24 +667,37 @@ def test_services_and_packages_fallbacks_publish_null():
 
 def test_failed_probes_publish_null_not_empty(rhel8_facts):
     """A probe that ran and failed is "not collected", never "collected and empty"."""
-    registered = dict(FULL_MIGRATION)
-    registered.update({
-        "disco_backup_monitoring": cmd("", rc=127),
-        "disco_third_party_modules": cmd("", rc=1),
-        "disco_sudoers_d_files": {"failed": False, "msg": "permission denied"},
-        "disco_efi_dir": {"failed": False, "msg": "stat failed"},
-    })
+    sets = {**FULL_PROBES, "kernel": {**FULL_PROBES["kernel"], "third_party_modules": (1, "")}}
+    registered = _registers(
+        _without(sets, identity=["keytab"]),
+        disco_efi_dir={"failed": False, "msg": "stat failed"}, disco_ec2_check=skipped(), disco_azure_check=skipped(),
+        disco_backup_monitoring=cmd("", rc=127),
+    )
     f = _migration(rhel8_facts, registered)
     assert f["disco_backup"]["agents"] is None
     assert f["disco_kernel"]["third_party_modules"] is None
-    assert f["disco_security"]["sudoers_drop_ins"] is None
+    assert f["disco_identity"]["krb5_keytab_exists"] is None
     assert f["disco_platform"]["boot_mode"] is None
 
 
 def test_sshd_drop_ins_null_where_not_checked(rhel8_facts):
-    """RHEL 6/7 have no sshd_config.d, so the find is skipped and nothing was collected."""
-    registered = dict(FULL_MIGRATION, disco_sshd_d_files=skipped(), disco_sshd_d_contents={"results": [], "skipped": True})
+    """RHEL 6/7 have no sshd_config.d, so it isn't listed and nothing was collected."""
+    registered = dict(FULL_MIGRATION, disco_security_probes=probes(_without(FULL_PROBES, security=["sshd_d"])["security"]))
     assert _migration(rhel8_facts, registered)["disco_security"]["sshd_config_drop_ins"] is None
+
+
+def test_batched_probe_output_is_never_templated(rhel8_facts):
+    """File contents travel base64-encoded and stay literal, even with | or {{ }} in them."""
+    registered = dict(FULL_MIGRATION, disco_storage_probes=probes({"fstab": "a|b {{ 7 * 7 }}", "multipath": ""}))
+    assert _migration(rhel8_facts, registered)["disco_storage"]["fstab"] == "a|b {{ 7 * 7 }}"
+
+
+def test_whole_probe_task_skipped_publishes_nulls(rhel8_facts):
+    """A section whose probe task never ran (e.g. outside --tags) publishes null fields."""
+    f = publish("tasks/migration/network.yml", _ctx(rhel8_facts, disco_network_probes=skipped()))
+    assert f["disco_network"] == {"routes": None, "nmcli_connections": None, "teaming": None, "ifcfg_files": None}
+    f = publish("tasks/migration/network.yml", _ctx(rhel8_facts))
+    assert f["disco_network"]["routes"] is None
 
 
 def test_windows_ports_fallback_publishes_null():

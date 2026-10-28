@@ -6,9 +6,10 @@ module-specific checks:
 
 - skipped, or never run (undefined, e.g. outside the selected --tags): no
 - command / shell / win_command (has rc): only rc 0
-- any other module: its data key is present (slurp content, find files, stat
-  stat, uri status, win_powershell output, loop results, ...). With
-  failed_when: false a failed slurp or find leaves only `msg` behind.
+- any other module: its data key is present (stat stat, uri status,
+  win_powershell output, win_service_info services, win_feature_info
+  features). With failed_when: false a failed module leaves only `msg` behind.
+- batched migration probes: each entry from the disco_probes filter has an rc.
 
 Probes whose non-zero rc still carries data (e.g. `subscription-manager status`
 when unregistered) don't use this test.
@@ -21,7 +22,7 @@ except ImportError:  # ansible-core < 2.19 passes Undefined to tests as-is
     def accept_args_markers(func):
         return func
 
-DATA_KEYS = ("content", "files", "stat", "status", "output", "results", "services", "features")
+DATA_KEYS = ("stat", "status", "output", "services", "features")
 
 
 @accept_args_markers

@@ -3,18 +3,19 @@
 #
 # setup already reports mounts with usage (ansible_mounts), block devices
 # (ansible_devices) and LVM PVs/VGs/LVs (ansible_lvm, when run as root).
-# This adds the configured fstab and multipath topology.
+# This adds the configured fstab and multipath topology, in one task (see
+# disco_probe_sh in vars/controls.yml).
 
-- name: Get fstab
-  ansible.builtin.slurp:
-    src: /etc/fstab
-  register: disco_fstab
-  failed_when: false
-  tags: [storage, readiness]
-
-- name: Get multipath topology
-  ansible.builtin.command: multipath -ll
-  register: disco_multipath
+- name: Probe fstab and multipath topology
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    probe fstab cat /etc/fstab
+    probe multipath multipath -ll
+    exit 0
+  args:
+    executable: /bin/bash
+  register: disco_storage_probes
   changed_when: false
   failed_when: false
   tags: [storage]
@@ -23,10 +24,11 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_storage: >-
-      {%- set fstab = disco_fstab.content | default('') | b64decode | trim -%}
-      {%- set mpath = disco_multipath.stdout | default('') | trim -%}
+      {%- set p = disco_storage_probes | disco_probes -%}
+      {%- set fstab = p.fstab.stdout | default('') | trim -%}
+      {%- set mpath = p.multipath.stdout | default('') | trim -%}
       {{ {
-           'fstab': fstab if disco_fstab is disco_collected and fstab else none,
-           'multipath': mpath if disco_multipath is disco_collected and mpath else none,
+           'fstab': fstab if p.fstab is disco_collected and fstab else none,
+           'multipath': mpath if p.multipath is disco_collected and mpath else none,
          } }}
   tags: [storage]

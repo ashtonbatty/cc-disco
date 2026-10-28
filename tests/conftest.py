@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 from ansible.parsing.dataloader import DataLoader
-from ansible.plugins.loader import init_plugin_loader, test_loader
+from ansible.plugins.loader import filter_loader, init_plugin_loader, test_loader
 from ansible.template import Templar
 
 try:
@@ -25,6 +25,7 @@ TASKS_DIR = REPO_ROOT / "tasks"
 
 init_plugin_loader()
 test_loader.add_directory(str(REPO_ROOT / "test_plugins"))
+filter_loader.add_directory(str(REPO_ROOT / "filter_plugins"))
 LOADER = DataLoader()
 
 
@@ -117,19 +118,6 @@ def skipped():
     return {"changed": False, "skipped": True, "skip_reason": "Conditional result was False"}
 
 
-def slurp(content=""):
-    return {"content": base64.b64encode(content.encode()).decode() if content else "", "encoding": "base64"}
-
-
-def slurp_missing():
-    return {"failed": False, "msg": "file not found: /etc/missing"}
-
-
-def find(paths=None):
-    paths = paths or []
-    return {"files": [{"path": p} for p in paths], "matched": len(paths)}
-
-
 def stat(exists=True):
     return {"stat": {"exists": exists}}
 
@@ -138,15 +126,16 @@ def uri(status=200):
     return {"status": status}
 
 
-def loop_results(items):
-    """Build a slurp-with-loop result: items is a list of (item, content-or-None)."""
-    results = []
-    for item, content in items:
-        entry = {"item": item}
-        if content is not None:
-            entry.update(slurp(content), source=item["path"] if isinstance(item, dict) else item)
-        results.append(entry)
-    return {"results": results}
+def probes(entries):
+    """A batched probe task's register: entries maps name -> output, or (rc, output).
+
+    Mirrors disco_probe_sh in vars/controls.yml: one name|rc|base64(output) line each.
+    """
+    lines = []
+    for name, value in entries.items():
+        rc, out = value if isinstance(value, tuple) else (0, value)
+        lines.append(f"{name}|{rc}|{base64.b64encode(out.encode()).decode()}")
+    return cmd("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

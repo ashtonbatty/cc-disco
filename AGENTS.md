@@ -14,6 +14,7 @@ Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. 
 - **Null convention:** `null` means not collected (skipped, missing source, or failed command), and `[]` means collected and empty. Never use placeholder strings.
 - **Collected?** Gate every field (and every "… as unavailable" task) on `<register> is disco_collected`, the Jinja test in `test_plugins/disco.py`. It is false for skipped, never-run and failed probes. Don't write ad-hoc `rc` / `is defined` checks; a test enforces this.
 - **Untrusted content:** later tasks read *registers*, never published facts. Probe output can contain `{{ … }}`, and published facts aren't marked unsafe in every core version.
+- **One round trip per migration section:** a section's commands and file reads go in one shell task built on `disco_probe_sh` (`vars/controls.yml`); the publish task unpacks it with `| disco_probes` (`filter_plugins/disco.py`) and gates each field on `p.<name> is disco_collected`. Knobs and OS checks reach the script as environment variables.
 - **Don't duplicate setup:** check `ansible -m setup`, `package_facts` and `service_facts` before adding a probe.
 
 ### Variable Naming
@@ -52,6 +53,7 @@ tasks/linux/              # Inventory layer, every Linux host
 tasks/migration/          # Migration layer, RHEL-family 6/7/8 only
 tasks/windows/            # Inventory layer, Windows (included dynamically)
 test_plugins/disco.py     # disco_collected: did a registered probe run and return its data?
+filter_plugins/disco.py   # disco_probes: unpack a migration section's batched probe output
 tests/                    # Unit + integration tests
 inventory/                # Inventory files
 ```

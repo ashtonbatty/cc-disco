@@ -194,6 +194,16 @@ def test_collected_checks_use_disco_collected(task_file):
     assert not adhoc.search(text), f"{task_file}: use `<register> is disco_collected`"
 
 
+@pytest.mark.parametrize("task_file", [f for f in TASK_FILES if f.startswith("tasks/migration/")])
+def test_migration_sections_probe_in_one_task(task_file):
+    """Each section batches its commands into one shell task: one round trip, not one per command."""
+    probes = [t for t in load_tasks(task_file) if _module(t) in PROBE_MODULES]
+    assert len(probes) <= 1, f"{task_file}: {[t['name'] for t in probes]}"
+    for task in probes:
+        if task["register"].endswith("_probes"):
+            assert "{{ disco_probe_sh }}" in task[_module(task)]
+
+
 def test_yum_and_dnf_only_run_through_disco_yum():
     pattern = re.compile(r"(^|[\s;&|(])(yum|dnf)\s")
     for task_file, task in _all_tasks():

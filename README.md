@@ -88,7 +88,7 @@ Skipped probes publish `null`, and `disco_controls.omitted` lists the knobs that
 
 ## Tags
 
-Each task file has one primary tag matching its name: `packages`, `services`, `processes`, `ports`, `components`, `containers`, and the migration sections (`platform`, `kernel`, `network`, `firewall`, `storage`, `security`, `identity`, `satellite`, `backup`, `filesystem`, `readiness`, `apps`). `deep_kernel`, `deep_security` and `deep_filesystem` select only the expensive probes plus their section's publish task.
+Each task file has one primary tag matching its name: `packages`, `services`, `processes`, `ports`, `components`, `containers`, and the migration sections (`platform`, `kernel`, `network`, `firewall`, `storage`, `security`, `identity`, `satellite`, `backup`, `filesystem`, `readiness`, `apps`). `deep_kernel`, `deep_security` and `deep_filesystem` select their section (each migration section probes in a single task).
 
 Some sections read data collected by another. The producing tasks already carry the consumer's tag, so `--tags readiness` pulls in what it needs:
 
@@ -97,7 +97,6 @@ Some sections read data collected by another. The producing tasks already carry 
 | `packages` (package_facts) | `ansible_facts.packages` | `readiness`, `apps`, `satellite` |
 | `services` (service_facts) | `ansible_facts.services` | `firewall` |
 | `processes` (ps) | process owners | `ports` |
-| `storage` (fstab) | fstab content | `readiness` |
 
 ## Controller requirements
 

@@ -1,40 +1,24 @@
 ---
 # Identity / Domain Join
+#
+# All probes run in one task (see disco_probe_sh in vars/controls.yml).
 
-- name: Get SSSD config
-  ansible.builtin.slurp:
-    src: /etc/sssd/sssd.conf
-  register: disco_sssd_conf
-  failed_when: false
-  no_log: true
-  tags: [identity]
-
-- name: Get realm list
-  ansible.builtin.command: realm list
-  register: disco_realm_list
+- name: Probe SSSD, realm, Kerberos and nsswitch configuration
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    probe sssd cat /etc/sssd/sssd.conf
+    probe realm realm list
+    probe krb5 cat /etc/krb5.conf
+    if [ -e /etc/krb5.keytab ]; then emit keytab 0 true; else emit keytab 0 false; fi
+    probe nsswitch cat /etc/nsswitch.conf
+    exit 0
+  args:
+    executable: /bin/bash
+  register: disco_identity_probes
   changed_when: false
   failed_when: false
-  tags: [identity]
-
-- name: Get krb5.conf
-  ansible.builtin.slurp:
-    src: /etc/krb5.conf
-  register: disco_krb5_conf
-  failed_when: false
-  tags: [identity]
-
-- name: Check if host is domain-joined (keytab exists)
-  ansible.builtin.stat:
-    path: /etc/krb5.keytab
-  register: disco_krb5_keytab
-  failed_when: false
-  tags: [identity]
-
-- name: Get nsswitch.conf
-  ansible.builtin.slurp:
-    src: /etc/nsswitch.conf
-  register: disco_nsswitch_conf
-  failed_when: false
+  no_log: true
   tags: [identity]
 
 - name: Publish identity facts
@@ -43,17 +27,18 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_identity: >-
-      {%- set sssd = disco_sssd_conf.content | default('') | b64decode | trim
+      {%- set p = disco_identity_probes | disco_probes -%}
+      {%- set sssd = p.sssd.stdout | default('') | trim
            | regex_replace('(?m)^(\\s*ldap_default_authtok\\s*=).*$', '\\1 <redacted>') -%}
-      {%- set realm = disco_realm_list.stdout | default('') | trim -%}
-      {%- set krb5 = disco_krb5_conf.content | default('') | b64decode | trim -%}
-      {%- set nss = disco_nsswitch_conf.content | default('') | b64decode | trim -%}
+      {%- set realm = p.realm.stdout | default('') | trim -%}
+      {%- set krb5 = p.krb5.stdout | default('') | trim -%}
+      {%- set nss = p.nsswitch.stdout | default('') | trim -%}
       {{ {
-           'sssd_conf': sssd if disco_sssd_conf is disco_collected and sssd else none,
-           'realm_list': realm if disco_realm_list is disco_collected and realm else none,
-           'krb5_conf': krb5 if disco_krb5_conf is disco_collected and krb5 else none,
-           'krb5_keytab_exists': disco_krb5_keytab.stat.exists if disco_krb5_keytab is disco_collected else none,
-           'nsswitch_conf': nss if disco_nsswitch_conf is disco_collected and nss else none,
+           'sssd_conf': sssd if p.sssd is disco_collected and sssd else none,
+           'realm_list': realm if p.realm is disco_collected and realm else none,
+           'krb5_conf': krb5 if p.krb5 is disco_collected and krb5 else none,
+           'krb5_keytab_exists': (p.keytab.stdout == 'true') if p.keytab is disco_collected else none,
+           'nsswitch_conf': nss if p.nsswitch is disco_collected and nss else none,
          } }}
   no_log: true
   tags: [identity]

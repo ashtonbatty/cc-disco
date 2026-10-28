@@ -2,44 +2,41 @@
 # Firewall
 #
 # service_facts already reports whether firewalld / iptables / nftables services run.
-# This adds the active rule sets.
+# This adds the active rule sets. All probes run in one task (see disco_probe_sh
+# in vars/controls.yml).
 
-- name: Get firewalld zones and rules
-  # Zone/rich-rule dump requires firewall-cmd textual output.
-  ansible.builtin.command: firewall-cmd --list-all-zones
-  register: disco_firewalld_zones
+- name: Probe firewalld zones, iptables and nftables rules
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    [ -n "$DISCO_FIREWALLD" ] && probe firewalld firewall-cmd --list-all-zones
+    probe iptables iptables -L -n -v
+    [ -n "$DISCO_NFT" ] && probe nftables nft list ruleset
+    exit 0
+  args:
+    executable: /bin/bash
+  environment:
+    # firewall-cmd only answers while firewalld runs; nftables is RHEL 8+.
+    DISCO_FIREWALLD: >-
+      {{ 'yes' if (ansible_facts.services | default({}, true)).get('firewalld.service',
+           (ansible_facts.services | default({}, true)).get('firewalld', {})).state | default('') == 'running' else '' }}
+    DISCO_NFT: "{{ 'yes' if rhel_major | int >= 8 else '' }}"
+  register: disco_firewall_probes
   changed_when: false
   failed_when: false
-  when: >-
-    (ansible_facts.services | default({}, true)).get('firewalld.service',
-      (ansible_facts.services | default({}, true)).get('firewalld', {})).state | default('') == 'running'
-  tags: [firewall]
-
-- name: Get iptables rules
-  ansible.builtin.command: iptables -L -n -v
-  register: disco_iptables_rules
-  changed_when: false
-  failed_when: false
-  tags: [firewall]
-
-- name: Get nftables rules (RHEL 8+)
-  ansible.builtin.command: nft list ruleset
-  register: disco_nftables_rules
-  changed_when: false
-  failed_when: false
-  when: rhel_major | int >= 8
   tags: [firewall]
 
 - name: Publish firewall facts
   ansible.builtin.set_fact:
     cacheable: true
     disco_firewall: >-
-      {%- set zones = disco_firewalld_zones.stdout | default('') | trim -%}
-      {%- set ipt = disco_iptables_rules.stdout | default('') | trim -%}
-      {%- set nft = disco_nftables_rules.stdout | default('') | trim -%}
+      {%- set p = disco_firewall_probes | disco_probes -%}
+      {%- set zones = p.firewalld.stdout | default('') | trim -%}
+      {%- set ipt = p.iptables.stdout | default('') | trim -%}
+      {%- set nft = p.nftables.stdout | default('') | trim -%}
       {{ {
-           'firewalld_zones': zones if disco_firewalld_zones is disco_collected and zones else none,
-           'iptables_rules': ipt if disco_iptables_rules is disco_collected and ipt else none,
-           'nftables_rules': nft if disco_nftables_rules is disco_collected and nft else none,
+           'firewalld_zones': zones if p.firewalld is disco_collected and zones else none,
+           'iptables_rules': ipt if p.iptables is disco_collected and ipt else none,
+           'nftables_rules': nft if p.nftables is disco_collected and nft else none,
          } }}
   tags: [firewall]
