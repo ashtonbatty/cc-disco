@@ -25,7 +25,7 @@ Windows hosts must be in the `windows` inventory group with their connection set
 
 ## Output
 
-- **Facts.** Each host's `ansible_facts` holds the setup facts plus everything listed below. They are stored in the jsonfile fact cache (`./tmp/ansible_fact_cache`) or, under AAP, in the controller's fact storage when "Enable Fact Storage" is on.
+- **Facts.** Each host's `ansible_facts` holds the setup facts plus everything listed below. On Linux, setup skips the `facter` and `ohai` subsets: they are slow on Puppet/Chef hosts and would add those tools' facts to the export. They are stored in the jsonfile fact cache (`./tmp/ansible_fact_cache`) or, under AAP, in the controller's fact storage when "Enable Fact Storage" is on.
 - **`output/facts/<inventory_hostname>.json`.** A copy of each host's `ansible_facts`, written by the final play.
 
 Each run starts by clearing cached facts, so the output is a fresh snapshot: a `--tags` run contains only the selected sections, plus setup facts and `disco_controls`.

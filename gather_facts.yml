@@ -38,6 +38,9 @@
   # a slow host doesn't hold up the rest of the batch.
   strategy: free
   gather_facts: true
+  # facter/ohai are slow on Puppet/Chef-managed hosts and their facts aren't part
+  # of the discovery output.
+  gather_subset: [all, "!facter", "!ohai"]
   become: true
   vars_files:
     - vars/controls.yml

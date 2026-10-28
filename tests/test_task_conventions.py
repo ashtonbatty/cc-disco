@@ -151,6 +151,12 @@ def test_discovery_plays_use_free_strategy():
             assert marker not in text, f"{task_file}: {task['name']!r} uses {marker} under strategy: free"
 
 
+def test_linux_setup_skips_facter_and_ohai():
+    plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
+    linux_play = next(p for p in plays if p["hosts"] == "all:!windows")
+    assert {"all", "!facter", "!ohai"} <= set(linux_play["gather_subset"])
+
+
 def test_every_linux_task_file_is_imported():
     plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
     linux_play = next(p for p in plays if p["hosts"] == "all:!windows")
