@@ -9,7 +9,7 @@
   register: disco_lsmod
   changed_when: false
   failed_when: false
-  tags: [kernel]
+  tags: [kernel, deep_kernel]
 
 - name: Detect third-party kernel modules
   # Module author/filepath correlation is not exposed by Ansible facts.
@@ -32,25 +32,6 @@
   when: (collect_deep_kernel | bool) and (collect_command_heavy_probes | bool)
   tags: [kernel, deep_kernel]
 
-- name: Check for deprecated kernel modules
-  # Deprecated module detection requires policy matching against loaded module names.
-  ansible.builtin.shell: |
-    set -o pipefail
-    lsmod | awk 'NR>1{print $1}' | while read mod; do
-      case "$mod" in
-        floppy|mptbase|mptscsih|mptspi|megaraid|aacraid|3w-9xxx|3w-sas)
-          echo "$mod"
-          ;;
-      esac
-    done
-  args:
-    executable: /bin/bash
-  register: disco_deprecated_modules
-  changed_when: false
-  failed_when: false
-  when: collect_deep_kernel | bool
-  tags: [kernel, deep_kernel]
-
 - name: Get GRUB defaults
   ansible.builtin.slurp:
     src: /etc/default/grub
@@ -66,6 +47,8 @@
   tags: [kernel]
 
 - name: Publish kernel facts
+  # Deprecated modules: loaded modules that RHEL 9/10 no longer ship. lsmod
+  # prints names with underscores (3w-9xxx loads as 3w_9xxx).
   ansible.builtin.set_fact:
     cacheable: true
     disco_kernel: >-
@@ -78,14 +61,16 @@
               'author': (f[2] | default('')) or none,
             }) -%}
       {%- endfor -%}
+      {%- set loaded = (disco_lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
+           if (disco_lsmod.rc | default(1)) == 0 else none -%}
+      {%- set deprecated = ['floppy', 'mptbase', 'mptscsih', 'mptspi', 'megaraid', 'aacraid', '3w_9xxx', '3w_sas'] -%}
       {%- set grub = disco_grub_defaults.content | default('') | b64decode | trim -%}
       {%- set tuned = disco_tuned_profile.stdout | default('') | regex_replace('^Current active profile:\\s*', '') | trim -%}
       {{ {
-           'loaded_modules': (disco_lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
-             if (disco_lsmod.rc | default(1)) == 0 else none,
+           'loaded_modules': loaded,
            'third_party_modules': third_party if disco_third_party_modules.rc is defined else none,
-           'deprecated_modules': (disco_deprecated_modules.stdout_lines | default([]))
-             if disco_deprecated_modules.rc is defined else none,
+           'deprecated_modules': (deprecated | select('in', loaded) | list)
+             if loaded is not none and collect_deep_kernel | bool else none,
            'grub_defaults': grub or none,
            'tuned_profile': tuned if (disco_tuned_profile.rc | default(1)) == 0 and tuned else none,
          } }}

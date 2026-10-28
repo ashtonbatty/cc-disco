@@ -81,7 +81,6 @@ def make_env():
         "basename": os.path.basename,
         "bool": _bool,
         "from_json": json.loads,
-        "to_json": json.dumps,
         "regex_replace": _regex_replace,
         "regex_search": _regex_search,
     })
@@ -218,7 +217,7 @@ def loop_results(items):
     for item, content in items:
         entry = {"item": item}
         if content is not None:
-            entry.update(slurp(content))
+            entry.update(slurp(content), source=item["path"] if isinstance(item, dict) else item)
         results.append(entry)
     return {"results": results}
 

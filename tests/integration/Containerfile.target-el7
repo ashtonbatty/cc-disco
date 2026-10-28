@@ -1,7 +1,5 @@
 FROM centos:7
 
-ARG SCENARIO=el7-minimal
-
 # CentOS 7 repos are archived. vault.centos.org now answers 403 to plain-HTTP
 # yum, so use the kernel.org mirror of the vault.
 RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo && \
@@ -31,6 +29,7 @@ RUN chmod 600 /home/ansible/.ssh/authorized_keys && \
     chown -R ansible:ansible /home/ansible/.ssh
 
 # Provision script (scenario-specific config)
+ARG SCENARIO=el7-minimal
 COPY tests/integration/scenarios/${SCENARIO}/provision.sh /tmp/provision.sh
 COPY tests/integration/scenarios/${SCENARIO}/files/ /tmp/provision-files/
 RUN chmod +x /tmp/provision.sh && /tmp/provision.sh

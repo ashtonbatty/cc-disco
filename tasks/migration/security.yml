@@ -90,17 +90,11 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_security: >-
-      {%- set sudoers_d = [] -%}
-      {%- for item in disco_sudoers_d_contents.results | default([]) if item.content is defined -%}
-        {%- set _ = sudoers_d.append({'file': item.item.path, 'content': item.content | b64decode}) -%}
-      {%- endfor -%}
-      {%- set sshd_d = [] -%}
-      {%- for item in disco_sshd_d_contents.results | default([]) if item.content is defined -%}
-        {%- set _ = sshd_d.append({'file': item.item.path, 'content': item.content | b64decode}) -%}
-      {%- endfor -%}
-      {%- set pam = [] -%}
-      {%- for item in disco_pam_contents.results | default([]) if item.content is defined -%}
-        {%- set _ = pam.append({'file': item.item, 'content': item.content | b64decode}) -%}
+      {%- set files = {'sudoers_d': [], 'sshd_d': [], 'pam': []} -%}
+      {%- for key, reg in [('sudoers_d', disco_sudoers_d_contents), ('sshd_d', disco_sshd_d_contents), ('pam', disco_pam_contents)] -%}
+        {%- for item in reg.results | default([]) if item.content is defined -%}
+          {%- set _ = files[key].append({'file': item.source, 'content': item.content | b64decode}) -%}
+        {%- endfor -%}
       {%- endfor -%}
       {%- set sudoers = disco_sudoers_main.content | default('') | b64decode | trim -%}
       {%- set sshd = disco_sshd_config.content | default('') | b64decode | trim -%}
@@ -108,10 +102,10 @@
       {%- set deep = collect_deep_security | bool -%}
       {{ {
            'sudoers_main': sudoers or none,
-           'sudoers_drop_ins': sudoers_d if deep else none,
+           'sudoers_drop_ins': files.sudoers_d if deep else none,
            'sshd_config': sshd or none,
-           'sshd_config_drop_ins': sshd_d if deep else none,
-           'pam': pam if deep else none,
+           'sshd_config_drop_ins': files.sshd_d if deep else none,
+           'pam': files.pam if deep else none,
            'crypto_policy': crypto if (disco_crypto_policy.rc | default(1)) == 0 and crypto else none,
          } }}
   no_log: true

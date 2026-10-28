@@ -42,8 +42,8 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_platform: >-
-      {%- set aws = none if disco_ec2_check.status is not defined else (disco_ec2_check.status | default(0) | int) in [200, 401] -%}
-      {%- set azure = none if disco_azure_check.status is not defined else (disco_azure_check.status | default(0) | int) == 200 -%}
+      {%- set aws = none if disco_ec2_check.status is not defined else (disco_ec2_check.status | int) in [200, 401] -%}
+      {%- set azure = none if disco_azure_check.status is not defined else (disco_azure_check.status | int) == 200 -%}
       {%- set vendor = ansible_facts.system_vendor | default('') -%}
       {%- if aws -%}{%- set detected = 'aws_ec2' -%}
       {%- elif azure -%}{%- set detected = 'azure_vm' -%}

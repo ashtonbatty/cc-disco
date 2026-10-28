@@ -87,18 +87,17 @@
       {%- set alts = disco_alternatives.stdout | default('') | trim -%}
       {%- set root_cron = disco_root_crontab.stdout | default('') | trim -%}
       {%- set sys_cron = disco_system_crontab.content | default('') | b64decode | trim -%}
-      {%- set heavy = collect_command_heavy_probes | bool -%}
       {{ {
            'packages_32bit': pkg32 if have_pkgs else none,
            'deprecated_packages': deprecated if have_pkgs else none,
            'java_packages': java if have_pkgs else none,
            'fstab_concerns': fstab_concerns if disco_fstab.content is defined else none,
            'xinetd_services': (disco_xinetd.files | map(attribute='path') | map('basename') | sort)
-             if heavy and disco_xinetd.files is defined else none,
-           'alternatives': alts if heavy and alts else none,
-           'root_crontab': root_cron if heavy and (disco_root_crontab.rc | default(1)) == 0 and root_cron else none,
-           'system_crontab': sys_cron if heavy and sys_cron else none,
+             if disco_xinetd.files is defined else none,
+           'alternatives': alts or none,
+           'root_crontab': root_cron if (disco_root_crontab.rc | default(1)) == 0 and root_cron else none,
+           'system_crontab': sys_cron or none,
            'cron_d_entries': (disco_cron_d.files | map(attribute='path') | map('basename') | sort)
-             if heavy and disco_cron_d.files is defined else none,
+             if disco_cron_d.files is defined else none,
          } }}
   tags: [readiness]

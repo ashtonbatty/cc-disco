@@ -18,6 +18,10 @@ from pathlib import Path
 
 import pytest
 
+# validate.py runs inside the controller container (stdlib only); its host lists
+# and checks are shared here so both paths assert the same things.
+from validate import EXPECTED_HOSTS, check_host, check_scenarios
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = REPO_ROOT / "tests" / "integration" / "compose.yml"
@@ -26,15 +30,6 @@ FACTS_DIR = OUTPUT_DIR / "facts"
 # e.g. COMPOSE="podman compose" CONTAINER_CLI=podman
 COMPOSE = os.environ.get("COMPOSE", "docker-compose").split()
 CONTAINER_CLI = os.environ.get("CONTAINER_CLI", "docker")
-
-MIGRATION_HOSTS = ["el6-legacy", "el7-webserver", "el7-minimal"]
-INVENTORY_HOSTS = ["el9-inventory", "el10-inventory", "ubuntu2404-inventory"]
-ALL_HOSTS = MIGRATION_HOSTS + INVENTORY_HOSTS
-MIGRATION_FACTS = [
-    "disco_platform", "disco_kernel", "disco_network", "disco_firewall", "disco_storage",
-    "disco_security", "disco_identity", "disco_satellite", "disco_backup",
-    "disco_filesystem", "disco_readiness", "disco_apps",
-]
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +72,7 @@ def facts():
         pytest.fail(f"{CONTAINER_CLI} cp failed (rc={cp_result.returncode}): {cp_result.stderr}")
 
     loaded = {}
-    for host in ALL_HOSTS:
+    for host in EXPECTED_HOSTS:
         path = FACTS_DIR / f"{host}.json"
         assert path.exists(), f"Facts not found at {path}"
         loaded[host] = json.loads(path.read_text())
@@ -114,51 +109,47 @@ def ubuntu(facts):
     return facts["ubuntu2404-inventory"]
 
 
-def _walk(obj, path=""):
-    if isinstance(obj, dict):
-        for key, val in obj.items():
-            yield from _walk(val, f"{path}.{key}")
-    elif isinstance(obj, list):
-        for i, val in enumerate(obj):
-            yield from _walk(val, f"{path}[{i}]")
-    else:
-        yield path, obj
-
-
 # ===========================================================================
 # Every host — profile, inventory layer, null convention
 # ===========================================================================
 
+def test_scenarios(facts):
+    assert check_scenarios(facts) == []
+
+
 class TestEveryHost:
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
-    def test_profile(self, facts, host):
-        expected = "migration" if host in MIGRATION_HOSTS else "inventory"
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_validator(self, facts, host):
+        """Profile, inventory facts, migration facts only where expected, null convention."""
+        assert check_host(host, facts[host]) == []
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_full_mode(self, facts, host):
         controls = facts[host]["disco_controls"]
-        assert controls["profile"] == expected
         assert controls["mode"] == "full"
         assert controls["omitted"] == []
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_setup_facts_present(self, facts, host):
         assert facts[host]["hostname"] == host
         assert facts[host]["distribution"]
         assert facts[host]["memtotal_mb"] > 0
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_packages_mirror_package_facts(self, facts, host):
         pkgs = facts[host]["packages"]
         assert isinstance(pkgs, dict) and len(pkgs) > 50
         assert "openssh-server" in pkgs
         assert isinstance(pkgs["openssh-server"], list)
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_disco_packages_shape(self, facts, host):
         dp = facts[host]["disco_packages"]
         assert set(dp) == {"third_party", "repos", "locks", "security_updates", "snaps", "last_kernel_update"}
         assert isinstance(dp["third_party"], list)
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_sshd_process(self, facts, host):
         procs = facts[host]["disco_processes"]
         sshd = [p for p in procs if p["name"] == "sshd"]
@@ -166,42 +157,22 @@ class TestEveryHost:
         assert isinstance(sshd[0]["pid"], int)
         assert sshd[0]["user"] == "root"
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_sshd_listening(self, facts, host):
         listeners = [p for p in facts[host]["tcp_listen"] if p["port"] == 22]
         assert listeners, "port 22 not in tcp_listen"
         assert listeners[0]["name"] == "sshd"
         assert isinstance(facts[host]["udp_listen"], list)
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_components(self, facts, host):
         comp = facts[host]["disco_components"]
         assert set(comp) == {"openssl", "java", "python"}
         assert any(v for v in comp["python"].values()), comp["python"]
 
-    @pytest.mark.parametrize("host", ALL_HOSTS)
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_no_container_runtime(self, facts, host):
         assert facts[host]["disco_containers"] is None
-
-    @pytest.mark.parametrize("host", ALL_HOSTS)
-    def test_migration_facts_only_on_migration_hosts(self, facts, host):
-        present = [name for name in MIGRATION_FACTS if name in facts[host]]
-        if host in MIGRATION_HOSTS:
-            assert present == MIGRATION_FACTS
-        else:
-            assert present == []
-
-    @pytest.mark.parametrize("host", ALL_HOSTS)
-    def test_null_convention(self, facts, host):
-        forbidden = {"not collected", "not configured", "not checked", "not registered",
-                     "not installed", "no crontab", "not present", "n/a", "not found"}
-        for name, value in facts[host].items():
-            if not name.startswith("disco_"):
-                continue
-            for path, leaf in _walk(value, name):
-                if isinstance(leaf, str):
-                    assert leaf.strip().lower() not in forbidden, f"{path}: {leaf!r}"
-                    assert leaf != "", f"{path}: empty string (should be null)"
 
     def test_redundant_probes_dropped(self, el7_web):
         # These are already provided by setup facts.
@@ -252,12 +223,6 @@ class TestEl7Webserver:
 
     def test_fstab_concerns_nfs(self, el7_web):
         assert any("nfs" in line for line in el7_web["disco_readiness"]["fstab_concerns"])
-
-    def test_agents(self, el7_web):
-        assert {"crowdstrike", "splunk"} <= set(el7_web["disco_backup"]["agents"])
-
-    def test_common_apps(self, el7_web):
-        assert "httpd" in el7_web["disco_apps"]["common"]
 
     def test_opt_directories(self, el7_web):
         opt = el7_web["disco_filesystem"]["opt"]
@@ -340,9 +305,6 @@ class TestEl6Legacy:
     def test_deprecated_packages(self, el6):
         assert {"ntp", "xinetd", "net-tools"} <= set(el6["disco_readiness"]["deprecated_packages"])
 
-    def test_xinetd_services_detected(self, el6):
-        assert "tftp" in el6["disco_readiness"]["xinetd_services"]
-
     def test_openssl_version(self, el6):
         assert "OpenSSL 1.0" in el6["disco_components"]["openssl"]
 
@@ -414,9 +376,6 @@ class TestUbuntuInventory:
         local = next(p for p in ubuntu["disco_packages"]["third_party"] if p["name"] == "disco-localtool")
         assert local["vendor"] is None
         assert not any(p["name"] == "bash" for p in ubuntu["disco_packages"]["third_party"])
-
-    def test_held_package(self, ubuntu):
-        assert "nginx" in ubuntu["disco_packages"]["locks"]
 
     def test_apt_sources(self, ubuntu):
         assert any("ubuntu" in line for line in ubuntu["disco_packages"]["repos"])

@@ -7,14 +7,14 @@ lists are always lists, and no English placeholders or empty strings stand in fo
 import pytest
 
 from conftest import (
-    assert_no_placeholders, cmd, controls_vars, find, loop_results, missing_cmd,
-    publish, skipped, slurp, stat, uri,
+    TASKS_DIR, assert_no_placeholders, cmd, controls_vars, find, loop_results, missing_cmd,
+    publish, skipped, slurp, slurp_missing, stat, uri,
 )
 
 
-def _ctx(facts, **registered):
+def _ctx(facts, extra=None, **registered):
     """Context for a host: rendered vars/controls.yml + setup facts + registered results."""
-    return {**controls_vars(facts), "ansible_facts": facts, **registered}
+    return {**controls_vars(facts, extra), "ansible_facts": facts, **registered}
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def test_package_manager_helpers(pkg_mgr, family, yum):
 
 
 def test_controls_lightweight_mode(rhel8_facts):
-    ctx = {**controls_vars(rhel8_facts, {"disco_mode": "lightweight"}), "ansible_facts": rhel8_facts, "ansible_run_tags": ["all"]}
+    ctx = _ctx(rhel8_facts, {"disco_mode": "lightweight"}, ansible_run_tags=["all"])
     controls = publish("tasks/controls.yml", ctx)["disco_controls"]
     assert controls["profile"] == "migration"
     assert controls["mode"] == "lightweight"
@@ -301,7 +301,6 @@ FULL_MIGRATION = {
     "disco_azure_check": skipped(),
     "disco_lsmod": cmd("Module                  Size  Used by\nvmw_balloon            20480  0\nfloppy  1  0"),
     "disco_third_party_modules": cmd("vmw_balloon|/lib/modules/extra/vmw_balloon.ko|VMware, Inc."),
-    "disco_deprecated_modules": cmd("floppy"),
     "disco_grub_defaults": slurp("GRUB_TIMEOUT=5\nGRUB_DEFAULT=saved"),
     "disco_tuned_profile": cmd("Current active profile: virtual-guest"),
     "disco_routes": cmd("default via 10.0.1.1 dev eth0\n10.0.1.0/24 dev eth0 proto kernel"),
@@ -346,8 +345,7 @@ EMPTY_MIGRATION = {
     "disco_azure_check": uri(-1),
     "disco_lsmod": cmd(""),
     "disco_third_party_modules": cmd(""),
-    "disco_deprecated_modules": cmd(""),
-    "disco_grub_defaults": {"failed": False, "msg": "file not found"},
+    "disco_grub_defaults": slurp_missing(),
     "disco_tuned_profile": missing_cmd(),
     "disco_routes": cmd(""),
     "disco_nmcli_connections": missing_cmd(),
@@ -356,7 +354,7 @@ EMPTY_MIGRATION = {
     "disco_firewalld_zones": skipped(),
     "disco_iptables_rules": missing_cmd(),
     "disco_nftables_rules": skipped(),
-    "disco_fstab": {"failed": False, "msg": "file not found"},
+    "disco_fstab": slurp_missing(),
     "disco_multipath": missing_cmd(),
     "disco_sudoers_main": slurp(""),
     "disco_sudoers_d_contents": loop_results([]),
@@ -364,7 +362,7 @@ EMPTY_MIGRATION = {
     "disco_sshd_d_contents": loop_results([]),
     "disco_pam_contents": loop_results([]),
     "disco_crypto_policy": skipped(),
-    "disco_sssd_conf": {"failed": False, "msg": "file not found"},
+    "disco_sssd_conf": slurp_missing(),
     "disco_realm_list": missing_cmd(),
     "disco_krb5_conf": slurp(""),
     "disco_krb5_keytab": stat(False),
@@ -384,14 +382,11 @@ EMPTY_MIGRATION = {
     "disco_cron_d": find([]),
 }
 
-MIGRATION_FILES = [
-    "platform", "kernel", "network", "firewall", "storage", "security",
-    "identity", "satellite", "backup", "filesystem", "readiness", "apps",
-]
+MIGRATION_FILES = sorted(p.stem for p in (TASKS_DIR / "migration").glob("*.yml"))
 
 
-def _migration(facts, registered):
-    ctx = _ctx(facts, **registered)
+def _migration(facts, registered, extra=None):
+    ctx = _ctx(facts, extra, **registered)
     published = {}
     for name in MIGRATION_FILES:
         published.update(publish(f"tasks/migration/{name}.yml", ctx))
@@ -465,15 +460,12 @@ def test_migration_empty_uses_null_and_empty_lists(rhel8_facts):
 
 def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
     registered = dict(FULL_MIGRATION)
-    for name in ("disco_third_party_modules", "disco_deprecated_modules", "disco_non_satellite_repos",
+    for name in ("disco_third_party_modules", "disco_non_satellite_repos",
                  "disco_backup_monitoring", "disco_opt_listing", "disco_data_listing", "disco_third_party_paths",
                  "disco_xinetd", "disco_alternatives", "disco_root_crontab", "disco_system_crontab", "disco_cron_d"):
         registered[name] = skipped()
     registered["disco_sudoers_d_contents"] = {"results": [], "skipped": True}
-    ctx = {**controls_vars(rhel8_facts, {"disco_mode": "lightweight"}), "ansible_facts": rhel8_facts, **registered}
-    f = {}
-    for name in MIGRATION_FILES:
-        f.update(publish(f"tasks/migration/{name}.yml", ctx))
+    f = _migration(rhel8_facts, registered, {"disco_mode": "lightweight"})
     assert f["disco_kernel"]["third_party_modules"] is None
     assert f["disco_kernel"]["deprecated_modules"] is None
     assert f["disco_security"]["sudoers_drop_ins"] is None

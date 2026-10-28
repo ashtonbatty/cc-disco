@@ -1,12 +1,9 @@
 """Regression tests for playbook task selection and task-source semantics."""
-from pathlib import Path
 import os
 import subprocess
 
-from conftest import load_task
+from conftest import REPO_ROOT, load_task
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPORT_TASK = "Write per-host facts file"
 RESET_TASK = "Clear cached facts"
 CONTROLS_TASK = "Publish discovery controls"

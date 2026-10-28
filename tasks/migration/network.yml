@@ -54,7 +54,7 @@
            'nmcli_connections': disco_nmcli_connections.stdout_lines
              if (disco_nmcli_connections.rc | default(1)) == 0 else none,
            'teaming': team or none,
-           'ifcfg_files': disco_ifcfg_files.files | default([]) | map(attribute='path') | sort
+           'ifcfg_files': disco_ifcfg_files.files | map(attribute='path') | sort
              if disco_ifcfg_files.files is defined else none,
          } }}
   tags: [network]

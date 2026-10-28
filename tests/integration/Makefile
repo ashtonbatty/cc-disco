@@ -14,7 +14,7 @@ $(SSH_KEY):
 # Targets
 # ---------------------------------------------------------------------------
 
-test-integration: $(SSH_KEY) integration-down integration-build integration-up
+test-integration: integration-down integration-build integration-up
 
 integration-build: $(SSH_KEY)
 	$(COMPOSE) build
@@ -25,6 +25,6 @@ integration-up:
 integration-down:
 	$(COMPOSE) down --volumes --remove-orphans 2>/dev/null || true
 
-integration-clean: integration-down
+integration-clean:
 	$(COMPOSE) down --rmi local --volumes --remove-orphans 2>/dev/null || true
 	rm -rf ssh-keys/ output/
