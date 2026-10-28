@@ -6,16 +6,16 @@
 
 discovery_mode: "{{ disco_mode | default('full') }}"
 
-# RHEL-family 6/7/8 hosts get the migration layer on top of the inventory layer.
-# The distribution list is explicit: Amazon Linux 2 reports os_family RedHat with major version 2.
-# Override with -e disco_profile=inventory to skip the migration layer.
+# The migration layer is opt-in (-e disco_profile=migration) and only applies to
+# RHEL-family 6/7/8; every other host stays on the inventory profile. The
+# distribution list is explicit: Amazon Linux 2 reports os_family RedHat with major version 2.
 disco_migration_distributions: [RedHat, CentOS, OracleLinux, Rocky, AlmaLinux, Scientific]
 discovery_profile: >-
-  {{ disco_profile | default(
-       'migration'
-       if (ansible_facts.distribution | default('')) in disco_migration_distributions
-          and (ansible_facts.distribution_major_version | default('99') | int) <= 8
-       else 'inventory') }}
+  {{ 'migration'
+     if (disco_profile | default('inventory')) == 'migration'
+        and (ansible_facts.distribution | default('')) in disco_migration_distributions
+        and (ansible_facts.distribution_major_version | default('99') | int) <= 8
+     else 'inventory' }}
 
 rhel_major: "{{ ansible_facts.distribution_major_version | default('0') }}"
 

@@ -133,7 +133,7 @@ def test_windows_tasks_only_included_dynamically():
         for task in play.get("tasks", []):
             imported = task.get("ansible.builtin.import_tasks", "")
             assert not str(imported).startswith("tasks/windows/"), f"static import of {imported}"
-    windows_play = next(p for p in plays if p["hosts"] == "windows")
+    windows_play = _play("Windows discovery")
     included = {t["ansible.builtin.include_tasks"] for t in windows_play["tasks"] if "ansible.builtin.include_tasks" in t}
     on_disk = {f for f in TASK_FILES if f.startswith("tasks/windows/")}
     assert included == on_disk
@@ -152,21 +152,34 @@ def test_discovery_plays_use_free_strategy():
 
 
 def test_linux_setup_skips_facter_and_ohai():
-    plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
-    linux_play = next(p for p in plays if p["hosts"] == "all:!windows")
+    linux_play = _play("Linux discovery")
     assert {"all", "!facter", "!ohai"} <= set(linux_play["gather_subset"])
 
 
-def test_every_linux_task_file_is_imported():
+def _play(name):
     plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
-    linux_play = next(p for p in plays if p["hosts"] == "all:!windows")
-    imported = set()
-    for task in linux_play["tasks"]:
-        for inner in [task] + task.get("block", []):
-            if "ansible.builtin.import_tasks" in inner:
-                imported.add(inner["ansible.builtin.import_tasks"])
+    return next(p for p in plays if p["name"] == name)
+
+
+def _imports(play):
+    return {t["ansible.builtin.import_tasks"] for t in play["tasks"] if "ansible.builtin.import_tasks" in t}
+
+
+def test_every_linux_task_file_is_imported():
+    imported = _imports(_play("Linux discovery")) | _imports(_play("Migration discovery"))
     expected = {f for f in TASK_FILES if not f.startswith("tasks/windows/")}
     assert imported == expected
+
+
+def test_migration_layer_is_gated_once():
+    """One end_host at the top of the migration play, instead of a condition on every task."""
+    play = _play("Migration discovery")
+    gate = play["tasks"][0]
+    assert gate["ansible.builtin.meta"] == "end_host"
+    assert "migration" in gate["when"] and gate["tags"] == ["always"]
+    assert _imports(play) == {f for f in TASK_FILES if f.startswith("tasks/migration/")}
+    assert all("when" not in t for t in play["tasks"][1:])
+    assert not any(f.startswith("tasks/migration/") for f in _imports(_play("Linux discovery")))
 
 
 @pytest.mark.parametrize("task_file", TASK_FILES)

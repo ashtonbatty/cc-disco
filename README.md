@@ -5,7 +5,7 @@ Read-only Ansible discovery for Linux and Windows servers. Everything discovered
 Two layers:
 
 - **Inventory** (every host: RHEL 6–10, Ubuntu, Windows Server). Installed packages, component versions, services, running processes, listening ports, pending security updates and running containers, for vulnerability response.
-- **Migration** (RHEL-family 6/7/8 only). Configuration needed to plan an upgrade to RHEL 9/10: kernel modules, network config, firewall rules, storage config, sudo/sshd/PAM, identity, Satellite, agents, and readiness checks.
+- **Migration** (opt-in with `-e disco_profile=migration`; RHEL-family 6/7/8 only). Configuration needed to plan an upgrade to RHEL 9/10: kernel modules, network config, firewall rules, storage config, sudo/sshd/PAM, identity, Satellite, agents, and readiness checks.
 
 Nothing is modified on target hosts. Data that `setup`, `package_facts` or `service_facts` already provide is never collected a second time; the playbook only adds what they lack.
 
@@ -18,7 +18,7 @@ ansible-playbook gather_facts.yml                        # all hosts
 ansible-playbook gather_facts.yml --limit rhel8          # a group
 ansible-playbook gather_facts.yml --tags packages,processes,ports
 ansible-playbook gather_facts.yml -e disco_mode=lightweight
-ansible-playbook gather_facts.yml -e disco_profile=inventory   # skip the migration layer on RHEL 6/7/8
+ansible-playbook gather_facts.yml -e disco_profile=migration   # add the migration layer on RHEL 6/7/8
 ```
 
 Windows hosts must be in the `windows` inventory group with their connection settings (see `inventory/hosts.yml`).
@@ -56,6 +56,8 @@ Notes:
 - Ubuntu needs `python3-apt` for `package_facts`. It is present on server images; without it `packages` is null.
 
 ### RHEL-family 6/7/8 (migration layer)
+
+Only with `-e disco_profile=migration`. Other hosts stay on the inventory profile even when it's requested, and `disco_controls.profile` records which one ran.
 
 | Fact | Contents | Already in setup facts, so not collected |
 |---|---|---|

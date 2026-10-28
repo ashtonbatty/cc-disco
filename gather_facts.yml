@@ -3,16 +3,16 @@
 #
 # Every Linux and Windows host gets the inventory layer (installed packages,
 # services, running processes, listening ports, component versions, containers)
-# for vulnerability response. RHEL-family 6/7/8 hosts also get the migration
-# layer for RHEL 9/10 upgrade planning. All tasks are read-only — nothing is
-# modified on target hosts.
+# for vulnerability response. With -e disco_profile=migration, RHEL-family 6/7/8
+# hosts also get the migration layer for RHEL 9/10 upgrade planning. All tasks
+# are read-only — nothing is modified on target hosts.
 #
 # Usage:
 #   ansible-playbook gather_facts.yml
 #   ansible-playbook gather_facts.yml --limit rhel8
 #   ansible-playbook gather_facts.yml --tags packages,processes
 #   ansible-playbook gather_facts.yml -e disco_mode=lightweight
-#   ansible-playbook gather_facts.yml -e disco_profile=inventory
+#   ansible-playbook gather_facts.yml -e disco_profile=migration
 #
 # Output: cacheable facts (jsonfile fact cache / AAP fact storage) and
 #         ./output/facts/<inventory_hostname>.json
@@ -63,34 +63,49 @@
     - name: Import container tasks
       ansible.builtin.import_tasks: tasks/linux/containers.yml
 
-    # --- Migration layer: RHEL-family 6/7/8 only -------------------------------
-    - name: Migration discovery
-      when: discovery_profile | trim == 'migration'
-      block:
-        - name: Import platform tasks
-          ansible.builtin.import_tasks: tasks/migration/platform.yml
-        - name: Import kernel tasks
-          ansible.builtin.import_tasks: tasks/migration/kernel.yml
-        - name: Import network tasks
-          ansible.builtin.import_tasks: tasks/migration/network.yml
-        - name: Import firewall tasks
-          ansible.builtin.import_tasks: tasks/migration/firewall.yml
-        - name: Import storage tasks
-          ansible.builtin.import_tasks: tasks/migration/storage.yml
-        - name: Import security tasks
-          ansible.builtin.import_tasks: tasks/migration/security.yml
-        - name: Import identity tasks
-          ansible.builtin.import_tasks: tasks/migration/identity.yml
-        - name: Import satellite tasks
-          ansible.builtin.import_tasks: tasks/migration/satellite.yml
-        - name: Import backup tasks
-          ansible.builtin.import_tasks: tasks/migration/backup.yml
-        - name: Import filesystem tasks
-          ansible.builtin.import_tasks: tasks/migration/filesystem.yml
-        - name: Import readiness tasks
-          ansible.builtin.import_tasks: tasks/migration/readiness.yml
-        - name: Import apps tasks
-          ansible.builtin.import_tasks: tasks/migration/apps.yml
+# ==============================================================================
+# Migration (opt-in: -e disco_profile=migration; RHEL-family 6/7/8 only)
+# ==============================================================================
+
+- name: Migration discovery
+  hosts: "all:!windows"
+  strategy: free
+  gather_facts: false
+  become: true
+  vars_files:
+    - vars/controls.yml
+
+  tasks:
+    # The one gate for the whole layer: every other host leaves the play here.
+    - name: Skip hosts outside the migration profile
+      ansible.builtin.meta: end_host
+      when: discovery_profile | trim != 'migration'
+      tags: [always]
+
+    - name: Import platform tasks
+      ansible.builtin.import_tasks: tasks/migration/platform.yml
+    - name: Import kernel tasks
+      ansible.builtin.import_tasks: tasks/migration/kernel.yml
+    - name: Import network tasks
+      ansible.builtin.import_tasks: tasks/migration/network.yml
+    - name: Import firewall tasks
+      ansible.builtin.import_tasks: tasks/migration/firewall.yml
+    - name: Import storage tasks
+      ansible.builtin.import_tasks: tasks/migration/storage.yml
+    - name: Import security tasks
+      ansible.builtin.import_tasks: tasks/migration/security.yml
+    - name: Import identity tasks
+      ansible.builtin.import_tasks: tasks/migration/identity.yml
+    - name: Import satellite tasks
+      ansible.builtin.import_tasks: tasks/migration/satellite.yml
+    - name: Import backup tasks
+      ansible.builtin.import_tasks: tasks/migration/backup.yml
+    - name: Import filesystem tasks
+      ansible.builtin.import_tasks: tasks/migration/filesystem.yml
+    - name: Import readiness tasks
+      ansible.builtin.import_tasks: tasks/migration/readiness.yml
+    - name: Import apps tasks
+      ansible.builtin.import_tasks: tasks/migration/apps.yml
 
 # ==============================================================================
 # Windows

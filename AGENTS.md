@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. Everything discovered is published as cacheable facts. An **inventory** layer (packages, services, processes, ports, component versions, containers) runs on every host, for vulnerability response. A **migration** layer runs only on RHEL-family 6/7/8, for RHEL 9/10 upgrade planning. Nothing is modified on target hosts.
+Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. Everything discovered is published as cacheable facts. An **inventory** layer (packages, services, processes, ports, component versions, containers) runs on every host, for vulnerability response. A **migration** layer is opt-in (`-e disco_profile=migration`) and runs only on RHEL-family 6/7/8, for RHEL 9/10 upgrade planning. It is its own play, gated once by an `end_host` at the top. Nothing is modified on target hosts.
 
 ## Key Conventions
 
@@ -45,7 +45,7 @@ make -C tests/integration test-integration   # Container targets, core 2.11 + 2.
 ## Project Structure
 
 ```
-gather_facts.yml          # Plays: reset cache → Linux discovery → Windows discovery → export
+gather_facts.yml          # Plays: reset cache → Linux discovery → Migration discovery → Windows discovery → export
 vars/controls.yml         # Profile selection, knobs, package-manager helpers (shared by both plays)
 tasks/controls.yml        # Publishes disco_controls
 tasks/linux/              # Inventory layer, every Linux host

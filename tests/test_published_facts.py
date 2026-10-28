@@ -58,13 +58,14 @@ def test_disco_collected(result, expected):
     ("Ubuntu", "24", "inventory"),
     ("Microsoft Windows Server 2022 Standard", "10", "inventory"),
 ])
-def test_profile_selection(distribution, major, expected):
-    v = controls_vars({"distribution": distribution, "distribution_major_version": major})
+def test_migration_profile_applies_to_rhel_6_to_8_only(distribution, major, expected):
+    v = controls_vars({"distribution": distribution, "distribution_major_version": major}, {"disco_profile": "migration"})
     assert v["discovery_profile"].strip() == expected
 
 
-def test_profile_override():
-    v = controls_vars({"distribution": "RedHat", "distribution_major_version": "7"}, {"disco_profile": "inventory"})
+@pytest.mark.parametrize("distribution,major", [("RedHat", "6"), ("CentOS", "7"), ("RedHat", "8"), ("Ubuntu", "24")])
+def test_inventory_is_the_default_profile(distribution, major):
+    v = controls_vars({"distribution": distribution, "distribution_major_version": major})
     assert v["discovery_profile"].strip() == "inventory"
 
 
@@ -83,7 +84,7 @@ def test_package_manager_helpers(pkg_mgr, family, yum):
 
 
 def test_controls_lightweight_mode(rhel8_facts):
-    ctx = _ctx(rhel8_facts, {"disco_mode": "lightweight"}, ansible_run_tags=["all"])
+    ctx = _ctx(rhel8_facts, {"disco_mode": "lightweight", "disco_profile": "migration"}, ansible_run_tags=["all"])
     controls = publish("tasks/controls.yml", ctx)["disco_controls"]
     assert controls["profile"] == "migration"
     assert controls["mode"] == "lightweight"
