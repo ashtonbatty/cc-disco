@@ -1,0 +1,54 @@
+---
+# Discovery controls shared by the Linux and Windows plays.
+#
+# Values are lazily templated, so facts gathered by setup (ansible_distribution,
+# ansible_pkg_mgr, ...) are available when a task first reads them.
+
+discovery_mode: "{{ disco_mode | default('full') }}"
+
+# RHEL-family 6/7/8 hosts get the migration layer on top of the inventory layer.
+# The distribution list is explicit: Amazon Linux 2 reports os_family RedHat with major version 2.
+# Override with -e disco_profile=inventory to skip the migration layer.
+disco_migration_distributions: [RedHat, CentOS, OracleLinux, Rocky, AlmaLinux, Scientific]
+discovery_profile: >-
+  {{ disco_profile | default(
+       'migration'
+       if (ansible_facts.distribution | default('')) in disco_migration_distributions
+          and (ansible_facts.distribution_major_version | default('99') | int) <= 8
+       else 'inventory') }}
+
+rhel_major: "{{ ansible_facts.distribution_major_version | default('0') }}"
+
+collect_deep_kernel: "{{ disco_collect_deep_kernel | default(discovery_mode != 'lightweight') | bool }}"
+collect_deep_filesystem: "{{ disco_collect_deep_filesystem | default(discovery_mode != 'lightweight') | bool }}"
+collect_deep_security: "{{ disco_collect_deep_security | default(discovery_mode != 'lightweight') | bool }}"
+collect_command_heavy_probes: "{{ disco_collect_command_heavy_probes | default(discovery_mode != 'lightweight') | bool }}"
+
+# --- Package manager helpers (Linux) -----------------------------------------
+
+disco_pkg_family: >-
+  {{ 'rpm' if ansible_facts.pkg_mgr | default('') in ['yum', 'dnf', 'dnf5', 'atomic_container']
+     else ('apt' if ansible_facts.pkg_mgr | default('') == 'apt' else 'other') }}
+
+# Every yum/dnf query runs cache-only (-C) and with the subscription-manager and
+# product-id plugins disabled, so it never refreshes metadata or rewrites redhat.repo.
+disco_yum: >-
+  {{ ('dnf' if ansible_facts.pkg_mgr | default('') in ['dnf', 'dnf5'] else 'yum')
+     ~ ' -C -q'
+     ~ ('' if ansible_facts.pkg_mgr | default('') == 'dnf5' else ' --disableplugin=subscription-manager,product-id') }}
+
+# rpm VENDOR substrings that identify the OS vendor's own packages. Anything else
+# (EPEL, ISV agents, locally built rpms) is reported as third-party.
+disco_os_vendor_patterns:
+  RedHat: Red Hat
+  CentOS: CentOS
+  Rocky: Rocky
+  AlmaLinux: AlmaLinux
+  OracleLinux: Oracle
+  Scientific: Scientific
+  Fedora: Fedora
+  Amazon: Amazon
+disco_os_vendor_pattern: "{{ disco_os_vendor_patterns[ansible_facts.distribution | default('')] | default(ansible_facts.distribution | default('')) }}"
+
+# apt package origins that belong to the OS vendor.
+disco_os_apt_origins: [Ubuntu, Debian]

@@ -1,0 +1,45 @@
+---
+# Firewall
+#
+# service_facts already reports whether firewalld / iptables / nftables services run.
+# This adds the active rule sets.
+
+- name: Get firewalld zones and rules
+  # Zone/rich-rule dump requires firewall-cmd textual output.
+  ansible.builtin.command: firewall-cmd --list-all-zones
+  register: disco_firewalld_zones
+  changed_when: false
+  failed_when: false
+  when: >-
+    (ansible_facts.services | default({})).get('firewalld.service',
+      (ansible_facts.services | default({})).get('firewalld', {})).state | default('') == 'running'
+  tags: [firewall]
+
+- name: Get iptables rules
+  ansible.builtin.command: iptables -L -n -v
+  register: disco_iptables_rules
+  changed_when: false
+  failed_when: false
+  tags: [firewall]
+
+- name: Get nftables rules (RHEL 8+)
+  ansible.builtin.command: nft list ruleset
+  register: disco_nftables_rules
+  changed_when: false
+  failed_when: false
+  when: rhel_major | int >= 8
+  tags: [firewall]
+
+- name: Publish firewall facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_firewall: >-
+      {%- set zones = disco_firewalld_zones.stdout | default('') | trim -%}
+      {%- set ipt = disco_iptables_rules.stdout | default('') | trim -%}
+      {%- set nft = disco_nftables_rules.stdout | default('') | trim -%}
+      {{ {
+           'firewalld_zones': zones if (disco_firewalld_zones.rc | default(1)) == 0 and zones else none,
+           'iptables_rules': ipt if (disco_iptables_rules.rc | default(1)) == 0 and ipt else none,
+           'nftables_rules': nft if (disco_nftables_rules.rc | default(1)) == 0 and nft else none,
+         } }}
+  tags: [firewall]

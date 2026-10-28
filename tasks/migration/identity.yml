@@ -1,0 +1,59 @@
+---
+# Identity / Domain Join
+
+- name: Get SSSD config
+  ansible.builtin.slurp:
+    src: /etc/sssd/sssd.conf
+  register: disco_sssd_conf
+  failed_when: false
+  no_log: true
+  tags: [identity]
+
+- name: Get realm list
+  ansible.builtin.command: realm list
+  register: disco_realm_list
+  changed_when: false
+  failed_when: false
+  tags: [identity]
+
+- name: Get krb5.conf
+  ansible.builtin.slurp:
+    src: /etc/krb5.conf
+  register: disco_krb5_conf
+  failed_when: false
+  tags: [identity]
+
+- name: Check if host is domain-joined (keytab exists)
+  ansible.builtin.stat:
+    path: /etc/krb5.keytab
+  register: disco_krb5_keytab
+  failed_when: false
+  tags: [identity]
+
+- name: Get nsswitch.conf
+  ansible.builtin.slurp:
+    src: /etc/nsswitch.conf
+  register: disco_nsswitch_conf
+  failed_when: false
+  tags: [identity]
+
+- name: Publish identity facts
+  # sssd.conf can hold an LDAP bind password (ldap_default_authtok). Facts are more
+  # widely readable than the old 0600 report, so the value is redacted before publishing.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_identity: >-
+      {%- set sssd = disco_sssd_conf.content | default('') | b64decode | trim
+           | regex_replace('(?m)^(\\s*ldap_default_authtok\\s*=).*$', '\\1 <redacted>') -%}
+      {%- set realm = disco_realm_list.stdout | default('') | trim -%}
+      {%- set krb5 = disco_krb5_conf.content | default('') | b64decode | trim -%}
+      {%- set nss = disco_nsswitch_conf.content | default('') | b64decode | trim -%}
+      {{ {
+           'sssd_conf': sssd or none,
+           'realm_list': realm if (disco_realm_list.rc | default(1)) == 0 and realm else none,
+           'krb5_conf': krb5 or none,
+           'krb5_keytab_exists': disco_krb5_keytab.stat.exists | default(none),
+           'nsswitch_conf': nss or none,
+         } }}
+  no_log: true
+  tags: [identity]

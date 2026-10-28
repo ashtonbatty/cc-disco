@@ -3,11 +3,13 @@ from pathlib import Path
 import os
 import subprocess
 
-import jinja2
-import yaml
+from conftest import load_task
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+EXPORT_TASK = "Write per-host facts file"
+RESET_TASK = "Clear cached facts"
+CONTROLS_TASK = "Publish discovery controls"
 
 
 def _ansible_env():
@@ -32,55 +34,50 @@ def _list_tasks(*tags):
     ).stdout
 
 
-def _load_task(task_file, task_name):
-    tasks = yaml.safe_load((REPO_ROOT / task_file).read_text())
-    for task in tasks:
-        if task.get("name") == task_name:
-            return task
-    raise AssertionError(f"Task {task_name!r} not found in {task_file}")
-
-
 class TestTaggedPlaybookBehavior:
-    """Tagged runs should include required prerequisites and report generation."""
+    """Tagged runs pull in their producers, the controls, the reset and the export."""
 
-    def test_readiness_tag_includes_prereqs_and_report(self):
+    def test_every_tagged_run_resets_publishes_controls_and_exports(self):
+        output = _list_tasks("network")
+        for task in (RESET_TASK, CONTROLS_TASK, EXPORT_TASK, "Publish network facts"):
+            assert task in output
+        assert "Publish package facts" not in output
+
+    def test_readiness_tag_includes_producers(self):
         output = _list_tasks("readiness")
-        assert "Collect package facts for structured package analysis" in output
-        assert "Collect service facts for structured service analysis" in output
-        assert "Render consolidated discovery report" in output
+        assert "Collect installed package facts" in output
+        assert "Get fstab" in output
+        assert "Publish migration readiness facts" in output
 
-    def test_apps_tag_includes_package_facts_and_report(self):
-        output = _list_tasks("apps")
-        assert "Collect package facts for structured package analysis" in output
-        assert "Build common server application list from package facts" in output
-        assert "Render consolidated discovery report" in output
+    def test_apps_and_satellite_tags_include_package_facts(self):
+        for tag in ("apps", "satellite"):
+            assert "Collect installed package facts" in _list_tasks(tag)
+
+    def test_firewall_tag_includes_service_facts(self):
+        assert "Collect service facts" in _list_tasks("firewall")
+
+    def test_ports_tag_includes_process_list(self):
+        output = _list_tasks("ports")
+        assert "List running processes" in output
+        assert "Publish listening port facts" in output
+
+    def test_deep_tags_still_publish(self):
+        assert "Publish kernel facts" in _list_tasks("deep_kernel")
+        assert "Publish security facts" in _list_tasks("deep_security")
+        assert "Publish filesystem facts" in _list_tasks("deep_filesystem")
+
+    def test_windows_play_is_listed(self):
+        output = _list_tasks()
+        assert "Windows discovery" in output
+        assert "Include Windows package tasks" in output
 
 
-class TestReadinessTaskSemantics:
-    """Task-source regression tests for shell and Jinja expressions."""
+class TestTaskSemantics:
+    """Task-source regression tests for shell expressions."""
 
     def test_backup_task_uses_real_newline_output(self):
-        task = _load_task("tasks/backup.yml", "Detect backup and monitoring agents")
+        task = load_task("tasks/migration/backup.yml", "Detect backup and monitoring agents")
         shell = task["ansible.builtin.shell"]
         assert "printf '%s\\n'" in shell
         assert 'found="${found}' not in shell
         assert '\\n"' not in shell
-
-    def test_time_service_template_supports_bare_service_names(self):
-        task = _load_task(
-            "tasks/readiness.yml",
-            "Build chronyd vs ntpd status from service facts",
-        )
-        template = jinja2.Environment().from_string(
-            task["ansible.builtin.set_fact"]["disco_time_services"]
-        )
-        rendered = template.render(
-            ansible_facts={
-                "services": {
-                    "ntpd": {"state": "running"},
-                    "chronyd": {"state": "stopped"},
-                }
-            }
-        )
-        lines = rendered.strip().splitlines()
-        assert lines == ["ntpd:running", "chronyd:stopped"]

@@ -1,0 +1,175 @@
+---
+# Installed Packages (every Linux host)
+#
+# package_facts provides the package list (ansible_facts.packages). These probes
+# add what it lacks: rpm vendor, enabled repos, version locks / holds, snaps,
+# the last kernel install, and pending security updates.
+
+- name: Collect installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+  failed_when: false
+  tags: [packages, readiness, apps, satellite]
+
+- name: List rpm packages with their vendor
+  # package_facts does not return the rpm VENDOR tag.
+  ansible.builtin.command: rpm -qa --qf "%{NAME}|%{VERSION}-%{RELEASE}.%{ARCH}|%{VENDOR}\n"  # noqa command-instead-of-module
+  register: disco_rpm_vendors
+  changed_when: false
+  failed_when: false
+  when: disco_pkg_family == 'rpm'
+  tags: [packages]
+
+- name: Get date of last kernel install
+  # Install chronology is only available from rpm --last.
+  ansible.builtin.shell: set -o pipefail && rpm -q --last kernel | head -1  # noqa command-instead-of-module
+  args:
+    executable: /bin/bash
+  register: disco_last_kernel_update
+  changed_when: false
+  failed_when: false
+  when: disco_pkg_family == 'rpm'
+  tags: [packages]
+
+- name: List enabled yum/dnf repositories
+  ansible.builtin.command: "{{ disco_yum }} repolist enabled"
+  register: disco_repos_enabled
+  changed_when: false
+  failed_when: false
+  when:
+    - disco_pkg_family == 'rpm'
+    - collect_command_heavy_probes | bool
+  tags: [packages]
+
+- name: List yum/dnf version locks
+  ansible.builtin.command: "{{ disco_yum }} versionlock list"
+  register: disco_versionlocks
+  changed_when: false
+  failed_when: false
+  when:
+    - disco_pkg_family == 'rpm'
+    - collect_command_heavy_probes | bool
+  tags: [packages]
+
+- name: List pending yum/dnf security advisories
+  # Cache-only: reflects the host's last metadata refresh.
+  ansible.builtin.command: >-
+    {{ disco_yum }} updateinfo list
+    {{ '--security' if ansible_facts.pkg_mgr in ['dnf', 'dnf5'] else 'security' }}
+  register: disco_security_updates_rpm
+  changed_when: false
+  failed_when: false
+  when:
+    - disco_pkg_family == 'rpm'
+    - collect_command_heavy_probes | bool
+  tags: [packages]
+
+- name: List apt sources
+  # deb lines and deb822 URIs/Suites from sources.list and sources.list.d.
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -rhE '^\s*(deb|deb-src|URIs:|Suites:|Components:)\s' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null
+    exit 0
+  args:
+    executable: /bin/bash
+  register: disco_apt_sources
+  changed_when: false
+  failed_when: false
+  when: disco_pkg_family == 'apt'
+  tags: [packages]
+
+- name: List held apt packages
+  ansible.builtin.command: apt-mark showhold
+  register: disco_apt_holds
+  changed_when: false
+  failed_when: false
+  when: disco_pkg_family == 'apt'
+  tags: [packages]
+
+- name: List pending apt upgrades
+  # Reads the local apt cache only; filtered to -security pockets when published.
+  ansible.builtin.command: apt list --upgradable
+  register: disco_security_updates_apt
+  changed_when: false
+  failed_when: false
+  when:
+    - disco_pkg_family == 'apt'
+    - collect_command_heavy_probes | bool
+  tags: [packages]
+
+- name: List installed snaps
+  ansible.builtin.command: snap list
+  register: disco_snaps
+  changed_when: false
+  failed_when: false
+  tags: [packages]
+
+- name: Publish package facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_packages: >-
+      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set third_party = [] -%}
+      {%- if disco_pkg_family == 'rpm' -%}
+        {%- for line in disco_rpm_vendors.stdout_lines | default([]) -%}
+          {%- set f = line.split('|') -%}
+          {%- if f | length == 3 and f[0] != 'gpg-pubkey' and f[2] is not search(disco_os_vendor_pattern, ignorecase=true) -%}
+            {%- set _ = third_party.append({'name': f[0], 'version': f[1], 'vendor': none if f[2] in ['', '(none)'] else f[2]}) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- elif disco_pkg_family == 'apt' -%}
+        {%- for name in pkgs | sort -%}
+          {%- for v in pkgs[name] if (v.origin | default('')) not in disco_os_apt_origins -%}
+            {%- set _ = third_party.append({'name': name, 'version': v.version | default(none), 'vendor': v.origin | default('', true) or none}) -%}
+          {%- endfor -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {%- set repos = [] -%}
+      {%- for line in disco_repos_enabled.stdout_lines | default([]) -%}
+        {%- set id = (line.split() | first | default('')) | regex_replace('^[!*]', '') -%}
+        {%- if id and id not in ['repo', 'repolist:'] -%}{%- set _ = repos.append(id) -%}{%- endif -%}
+      {%- endfor -%}
+      {%- for line in disco_apt_sources.stdout_lines | default([]) -%}
+        {%- set _ = repos.append(line | trim) -%}
+      {%- endfor -%}
+      {%- set locks_src = disco_versionlocks if disco_pkg_family == 'rpm' else disco_apt_holds -%}
+      {%- set locks = locks_src.stdout_lines | default([]) | map('trim') | reject('equalto', '') | reject('match', '(?i)versionlock list done') | list -%}
+      {%- set security = [] -%}
+      {%- for line in disco_security_updates_rpm.stdout_lines | default([]) -%}
+        {%- set f = line.split() -%}
+        {%- if f | length == 3 and '-' in f[0] -%}
+          {%- set _ = security.append({'advisory': f[0], 'severity': f[1].split('/') | first, 'package': f[2], 'version': none, 'source': none}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- for line in disco_security_updates_apt.stdout_lines | default([]) -%}
+        {%- set f = line.split() -%}
+        {%- if f | length >= 3 and '/' in f[0] and '-security' in f[0] -%}
+          {%- set _ = security.append({
+                'advisory': none, 'severity': none, 'package': f[0].split('/') | first,
+                'version': f[1], 'source': f[0].split('/', 1) | last,
+              }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set security_src = disco_security_updates_rpm if disco_pkg_family == 'rpm' else disco_security_updates_apt -%}
+      {%- set snaps = [] -%}
+      {%- for line in (disco_snaps.stdout_lines | default([]))[1:] -%}
+        {%- set f = line.split() -%}
+        {%- if f | length >= 5 -%}
+          {%- set _ = snaps.append({'name': f[0], 'version': f[1], 'revision': f[2], 'tracking': f[3], 'publisher': f[4]}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set kernel = disco_last_kernel_update.stdout | default('') | trim -%}
+      {{ {
+           'third_party': third_party
+             if (disco_pkg_family == 'rpm' and (disco_rpm_vendors.rc | default(1)) == 0)
+                or (disco_pkg_family == 'apt' and pkgs | length > 0)
+             else none,
+           'repos': repos
+             if (disco_repos_enabled.rc | default(1)) == 0 or (disco_apt_sources.rc | default(1)) == 0
+             else none,
+           'locks': locks if (locks_src.rc | default(1)) == 0 else none,
+           'security_updates': security if (security_src.rc | default(1)) == 0 else none,
+           'snaps': snaps if (disco_snaps.rc | default(1)) == 0 else none,
+           'last_kernel_update': kernel if kernel | length > 0 and (disco_last_kernel_update.rc | default(1)) == 0 else none,
+         } }}
+  tags: [packages]

@@ -1,0 +1,104 @@
+---
+# RHEL 9/10 Migration Readiness
+#
+# Package-derived lists use ansible_facts.packages (tag: packages); fstab concerns
+# use the fstab read by storage.yml (tag: storage). Interpreter, OpenSSL and Java
+# versions are in disco_components; time-service and NetworkManager state are in
+# ansible_facts.services.
+
+- name: Check for xinetd services
+  ansible.builtin.find:
+    paths: /etc/xinetd.d
+    file_type: file
+    recurse: false
+  register: disco_xinetd
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: Get alternatives entries
+  # alternatives --list is not available on RHEL 6; fall back to directory listing.
+  ansible.builtin.shell: |
+    set -o pipefail
+    if alternatives --list 2>/dev/null; then
+      exit 0
+    fi
+    # RHEL 6 fallback: parse /var/lib/alternatives directory entries
+    for alt in /var/lib/alternatives/*; do
+      [ -f "$alt" ] || continue
+      name=$(basename "$alt")
+      current=$(head -1 "$alt" 2>/dev/null)
+      printf '%s\t%s\t%s\n' "$name" "auto" "$current"
+    done
+  args:
+    executable: /bin/bash
+  register: disco_alternatives
+  changed_when: false
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: Get root crontab
+  ansible.builtin.command: crontab -l
+  register: disco_root_crontab
+  changed_when: false
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: Get system crontab
+  ansible.builtin.slurp:
+    src: /etc/crontab
+  register: disco_system_crontab
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: List cron.d entries
+  ansible.builtin.find:
+    paths: /etc/cron.d
+    file_type: file
+    recurse: false
+  register: disco_cron_d
+  failed_when: false
+  when: collect_command_heavy_probes | bool
+  tags: [readiness]
+
+- name: Publish migration readiness facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_readiness: >-
+      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set have_pkgs = pkgs | length > 0 -%}
+      {%- set pkg32 = [] -%}
+      {%- set java = [] -%}
+      {%- for name in pkgs | sort -%}
+        {%- for v in pkgs[name] -%}
+          {%- set nevra = name ~ '-' ~ v.version | default('') ~ '-' ~ v.release | default('') ~ '.' ~ v.arch | default('') -%}
+          {%- if (v.arch | default('')) is match('i[36]86') -%}{%- set _ = pkg32.append(nevra) -%}{%- endif -%}
+          {%- if name is match('^java-.*-(openjdk|oracle|ibm|corretto|zulu|temurin).*$') -%}{%- set _ = java.append(nevra) -%}{%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {%- set deprecated = ['ntp', 'sendmail', 'vsftpd', 'xinetd', 'talk', 'ypserv', 'ypbind', 'iptables-services', 'net-tools']
+           | select('in', pkgs) | list -%}
+      {%- set fstab = disco_fstab.content | default('') | b64decode -%}
+      {%- set fstab_concerns = fstab.splitlines() | map('trim') | reject('match', '#')
+           | select('search', 'nfs|cifs|ext[23]|_netdev') | list -%}
+      {%- set alts = disco_alternatives.stdout | default('') | trim -%}
+      {%- set root_cron = disco_root_crontab.stdout | default('') | trim -%}
+      {%- set sys_cron = disco_system_crontab.content | default('') | b64decode | trim -%}
+      {%- set heavy = collect_command_heavy_probes | bool -%}
+      {{ {
+           'packages_32bit': pkg32 if have_pkgs else none,
+           'deprecated_packages': deprecated if have_pkgs else none,
+           'java_packages': java if have_pkgs else none,
+           'fstab_concerns': fstab_concerns if disco_fstab.content is defined else none,
+           'xinetd_services': (disco_xinetd.files | map(attribute='path') | map('basename') | sort)
+             if heavy and disco_xinetd.files is defined else none,
+           'alternatives': alts if heavy and alts else none,
+           'root_crontab': root_cron if heavy and (disco_root_crontab.rc | default(1)) == 0 and root_cron else none,
+           'system_crontab': sys_cron if heavy and sys_cron else none,
+           'cron_d_entries': (disco_cron_d.files | map(attribute='path') | map('basename') | sort)
+             if heavy and disco_cron_d.files is defined else none,
+         } }}
+  tags: [readiness]

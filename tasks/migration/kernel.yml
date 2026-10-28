@@ -1,0 +1,91 @@
+---
+# Kernel, Modules, Boot, Tuning
+#
+# setup already reports the running kernel (ansible_kernel) and its command line
+# (ansible_cmdline). This adds loaded modules, GRUB defaults and the tuned profile.
+
+- name: Get loaded kernel modules
+  ansible.builtin.command: lsmod
+  register: disco_lsmod
+  changed_when: false
+  failed_when: false
+  tags: [kernel]
+
+- name: Detect third-party kernel modules
+  # Module author/filepath correlation is not exposed by Ansible facts.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for mod in $(lsmod | awk 'NR>1{print $1}'); do
+      info=$(modinfo "$mod" 2>/dev/null)
+      filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
+      if echo "$filename" | grep -qv '/kernel/'; then
+        author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
+        echo "${mod}|${filename}|${author}"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: disco_third_party_modules
+  changed_when: false
+  failed_when: false
+  when: (collect_deep_kernel | bool) and (collect_command_heavy_probes | bool)
+  tags: [kernel, deep_kernel]
+
+- name: Check for deprecated kernel modules
+  # Deprecated module detection requires policy matching against loaded module names.
+  ansible.builtin.shell: |
+    set -o pipefail
+    lsmod | awk 'NR>1{print $1}' | while read mod; do
+      case "$mod" in
+        floppy|mptbase|mptscsih|mptspi|megaraid|aacraid|3w-9xxx|3w-sas)
+          echo "$mod"
+          ;;
+      esac
+    done
+  args:
+    executable: /bin/bash
+  register: disco_deprecated_modules
+  changed_when: false
+  failed_when: false
+  when: collect_deep_kernel | bool
+  tags: [kernel, deep_kernel]
+
+- name: Get GRUB defaults
+  ansible.builtin.slurp:
+    src: /etc/default/grub
+  register: disco_grub_defaults
+  failed_when: false
+  tags: [kernel]
+
+- name: Get tuned profile
+  ansible.builtin.command: tuned-adm active
+  register: disco_tuned_profile
+  changed_when: false
+  failed_when: false
+  tags: [kernel]
+
+- name: Publish kernel facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_kernel: >-
+      {%- set third_party = [] -%}
+      {%- for line in disco_third_party_modules.stdout_lines | default([]) -%}
+        {%- set f = line.split('|') -%}
+        {%- set _ = third_party.append({
+              'module': f[0],
+              'filename': f[1] | default(none),
+              'author': (f[2] | default('')) or none,
+            }) -%}
+      {%- endfor -%}
+      {%- set grub = disco_grub_defaults.content | default('') | b64decode | trim -%}
+      {%- set tuned = disco_tuned_profile.stdout | default('') | regex_replace('^Current active profile:\\s*', '') | trim -%}
+      {{ {
+           'loaded_modules': (disco_lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
+             if (disco_lsmod.rc | default(1)) == 0 else none,
+           'third_party_modules': third_party if disco_third_party_modules.rc is defined else none,
+           'deprecated_modules': (disco_deprecated_modules.stdout_lines | default([]))
+             if disco_deprecated_modules.rc is defined else none,
+           'grub_defaults': grub or none,
+           'tuned_profile': tuned if (disco_tuned_profile.rc | default(1)) == 0 and tuned else none,
+         } }}
+  tags: [kernel, deep_kernel]

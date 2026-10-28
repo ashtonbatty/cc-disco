@@ -1,0 +1,42 @@
+---
+# Services (Windows)
+#
+# Published as `services` in service_facts shape ({name: {name, state, status, source}})
+# so the same query works on every OS. status maps the start mode:
+# auto/delayed -> enabled, manual -> manual, disabled -> disabled.
+
+- name: Collect Windows service information
+  ansible.windows.win_service_info:
+  register: disco_win_services
+  failed_when: false
+  tags: [services]
+
+- name: Publish Windows services
+  ansible.builtin.set_fact:
+    cacheable: true
+    services: >-
+      {%- set status_map = {'auto': 'enabled', 'delayed': 'enabled', 'manual': 'manual', 'disabled': 'disabled'} -%}
+      {%- set result = {} -%}
+      {%- for s in disco_win_services.services | default([]) -%}
+        {%- set _ = result.update({s.name: {
+              'name': s.name,
+              'state': s.state | default(none),
+              'status': status_map.get(s.start_mode | default(''), s.start_mode | default(none)),
+              'source': 'windows',
+              'display_name': s.display_name | default(none),
+              'start_mode': s.start_mode | default(none),
+              'path': s.path | default(none),
+              'username': s.username | default(none),
+            }}) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: disco_win_services.services is defined
+  tags: [services]
+
+- name: Publish Windows services as unavailable
+  # A literal null: a templated none would render as "" on ansible-core < 2.19.
+  ansible.builtin.set_fact:
+    cacheable: true
+    services: null
+  when: disco_win_services.services is not defined
+  tags: [services]

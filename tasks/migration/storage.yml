@@ -1,0 +1,32 @@
+---
+# Storage
+#
+# setup already reports mounts with usage (ansible_mounts), block devices
+# (ansible_devices) and LVM PVs/VGs/LVs (ansible_lvm, when run as root).
+# This adds the configured fstab and multipath topology.
+
+- name: Get fstab
+  ansible.builtin.slurp:
+    src: /etc/fstab
+  register: disco_fstab
+  failed_when: false
+  tags: [storage, readiness]
+
+- name: Get multipath topology
+  ansible.builtin.command: multipath -ll
+  register: disco_multipath
+  changed_when: false
+  failed_when: false
+  tags: [storage]
+
+- name: Publish storage facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_storage: >-
+      {%- set fstab = disco_fstab.content | default('') | b64decode | trim -%}
+      {%- set mpath = disco_multipath.stdout | default('') | trim -%}
+      {{ {
+           'fstab': fstab or none,
+           'multipath': mpath if (disco_multipath.rc | default(1)) == 0 and mpath else none,
+         } }}
+  tags: [storage]

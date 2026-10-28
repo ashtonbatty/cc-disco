@@ -1,0 +1,10 @@
+---
+# Listening Ports (Windows)
+#
+# win_listen_ports_facts publishes tcp_listen / udp_listen directly as facts,
+# in the same shape the Linux tasks produce.
+
+- name: Collect listening port facts
+  ansible.windows.win_listen_ports_facts:
+  failed_when: false
+  tags: [ports]

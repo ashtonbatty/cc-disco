@@ -1,0 +1,118 @@
+---
+# Security: sudoers, sshd, PAM
+
+- name: Get main sudoers file
+  ansible.builtin.slurp:
+    src: /etc/sudoers
+  register: disco_sudoers_main
+  failed_when: false
+  no_log: true
+  tags: [security]
+
+- name: Find sudoers.d drop-in files
+  ansible.builtin.find:
+    paths: /etc/sudoers.d
+    file_type: file
+  register: disco_sudoers_d_files
+  failed_when: false
+  when: collect_deep_security | bool
+  tags: [security, deep_security]
+
+- name: Read each sudoers.d file
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ disco_sudoers_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: disco_sudoers_d_contents
+  failed_when: false
+  no_log: true
+  when: collect_deep_security | bool
+  tags: [security, deep_security]
+
+- name: Get sshd_config
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config
+  register: disco_sshd_config
+  failed_when: false
+  no_log: true
+  tags: [security]
+
+- name: Find sshd_config.d drop-ins (RHEL 8+)
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    file_type: file
+    patterns: "*.conf"
+  register: disco_sshd_d_files
+  failed_when: false
+  when: (collect_deep_security | bool) and (rhel_major | int >= 8)
+  tags: [security, deep_security]
+
+- name: Read sshd_config.d drop-in files
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ disco_sshd_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: disco_sshd_d_contents
+  failed_when: false
+  no_log: true
+  when: collect_deep_security | bool
+  tags: [security, deep_security]
+
+- name: Read key PAM configs
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/pam.d/system-auth
+    - /etc/pam.d/password-auth
+    - /etc/pam.d/sshd
+    - /etc/pam.d/su
+  loop_control:
+    label: "{{ item }}"
+  register: disco_pam_contents
+  failed_when: false
+  no_log: true
+  when: collect_deep_security | bool
+  tags: [security, deep_security]
+
+- name: Get crypto policies (RHEL 8+)
+  ansible.builtin.command: update-crypto-policies --show
+  register: disco_crypto_policy
+  changed_when: false
+  failed_when: false
+  when: rhel_major | int >= 8
+  tags: [security]
+
+- name: Publish security facts
+  # Sensitive: sudoers, sshd and PAM content. no_log keeps it out of job output;
+  # the facts themselves still reach the fact cache and output/facts/*.json.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_security: >-
+      {%- set sudoers_d = [] -%}
+      {%- for item in disco_sudoers_d_contents.results | default([]) if item.content is defined -%}
+        {%- set _ = sudoers_d.append({'file': item.item.path, 'content': item.content | b64decode}) -%}
+      {%- endfor -%}
+      {%- set sshd_d = [] -%}
+      {%- for item in disco_sshd_d_contents.results | default([]) if item.content is defined -%}
+        {%- set _ = sshd_d.append({'file': item.item.path, 'content': item.content | b64decode}) -%}
+      {%- endfor -%}
+      {%- set pam = [] -%}
+      {%- for item in disco_pam_contents.results | default([]) if item.content is defined -%}
+        {%- set _ = pam.append({'file': item.item, 'content': item.content | b64decode}) -%}
+      {%- endfor -%}
+      {%- set sudoers = disco_sudoers_main.content | default('') | b64decode | trim -%}
+      {%- set sshd = disco_sshd_config.content | default('') | b64decode | trim -%}
+      {%- set crypto = disco_crypto_policy.stdout | default('') | trim -%}
+      {%- set deep = collect_deep_security | bool -%}
+      {{ {
+           'sudoers_main': sudoers or none,
+           'sudoers_drop_ins': sudoers_d if deep else none,
+           'sshd_config': sshd or none,
+           'sshd_config_drop_ins': sshd_d if deep else none,
+           'pam': pam if deep else none,
+           'crypto_policy': crypto if (disco_crypto_policy.rc | default(1)) == 0 and crypto else none,
+         } }}
+  no_log: true
+  tags: [security, deep_security]

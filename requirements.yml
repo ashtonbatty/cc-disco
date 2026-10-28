@@ -1,4 +1,8 @@
 ---
-# This project only uses ansible.builtin modules.
-# Add collections here if external dependencies are introduced.
-collections: []
+# Linux discovery uses ansible.builtin only. Windows discovery needs ansible.windows
+# (win_listen_ports_facts and win_feature_info arrived in 2.7.0). Windows tasks are
+# included dynamically, so a controller without this collection can still run the
+# Linux plays (e.g. the ansible-core 2.11 controller used for RHEL 6).
+collections:
+  - name: ansible.windows
+    version: ">=2.7.0"

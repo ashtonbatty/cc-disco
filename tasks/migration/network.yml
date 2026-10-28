@@ -1,0 +1,60 @@
+---
+# Networking
+#
+# setup already reports interfaces, addresses, bonding (ansible_<iface>.type/slaves/mode)
+# and DNS (ansible_dns); service_facts reports NetworkManager state. This adds the
+# routing table, NM connection profiles, teaming state and legacy ifcfg files.
+
+- name: Get routing table
+  ansible.builtin.command: ip route show
+  register: disco_routes
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: Get NetworkManager connection profiles
+  ansible.builtin.command: nmcli -t connection show
+  register: disco_nmcli_connections
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: Get network teaming state
+  # teamdctl state data has no equivalent Ansible fact/module.
+  ansible.builtin.shell: |
+    set -o pipefail
+    command -v teamdctl >/dev/null 2>&1 || exit 0
+    for dev in $(ip -o link show type team 2>/dev/null | awk -F': ' '{print $2}'); do
+      echo "=== $dev ==="
+      teamdctl "$dev" state
+    done
+  args:
+    executable: /bin/bash
+  register: disco_team_details
+  changed_when: false
+  failed_when: false
+  tags: [network]
+
+- name: List network-scripts ifcfg files
+  ansible.builtin.find:
+    paths: /etc/sysconfig/network-scripts
+    patterns: "ifcfg-*"
+    file_type: file
+  register: disco_ifcfg_files
+  failed_when: false
+  tags: [network]
+
+- name: Publish network facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_network: >-
+      {%- set team = disco_team_details.stdout | default('') | trim -%}
+      {{ {
+           'routes': disco_routes.stdout_lines if (disco_routes.rc | default(1)) == 0 else none,
+           'nmcli_connections': disco_nmcli_connections.stdout_lines
+             if (disco_nmcli_connections.rc | default(1)) == 0 else none,
+           'teaming': team or none,
+           'ifcfg_files': disco_ifcfg_files.files | default([]) | map(attribute='path') | sort
+             if disco_ifcfg_files.files is defined else none,
+         } }}
+  tags: [network]
