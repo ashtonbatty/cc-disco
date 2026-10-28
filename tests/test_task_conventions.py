@@ -139,6 +139,18 @@ def test_windows_tasks_only_included_dynamically():
     assert included == on_disk
 
 
+def test_discovery_plays_use_free_strategy():
+    """Discovery tasks never read another host's data, so no host waits for the slowest."""
+    plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
+    for play in plays:
+        if play["name"].endswith(" discovery"):
+            assert play.get("strategy") == "free", play["name"]
+    for task_file, task in _all_tasks():
+        text = yaml.safe_dump(task)
+        for marker in ("run_once", "delegate_to", "hostvars"):
+            assert marker not in text, f"{task_file}: {task['name']!r} uses {marker} under strategy: free"
+
+
 def test_every_linux_task_file_is_imported():
     plays = yaml.safe_load((REPO_ROOT / "gather_facts.yml").read_text())
     linux_play = next(p for p in plays if p["hosts"] == "all:!windows")

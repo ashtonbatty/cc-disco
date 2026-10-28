@@ -82,7 +82,7 @@ Notes:
 
 Skipped probes publish `null`, and `disco_controls.omitted` lists the knobs that were off.
 
-`ansible.cfg` defaults to `forks = 25`. Override per run with `ANSIBLE_FORKS=50 ansible-playbook gather_facts.yml`.
+`ansible.cfg` defaults to `forks = 25`. Override per run with `ANSIBLE_FORKS=50 ansible-playbook gather_facts.yml`. The discovery plays use `strategy: free`, so each host moves through its tasks at its own pace and one slow host doesn't stall the batch. Task output from different hosts is interleaved as a result.
 
 ## Tags
 
