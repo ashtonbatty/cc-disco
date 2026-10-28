@@ -6,8 +6,12 @@ set -euo pipefail
 cd /home/ansible/playbook
 INVENTORY_DIR=tests/integration/inventory
 
+# Every host in the two inventories; --list-hosts prints a header line first.
+HOSTS=$(/opt/ansible-2.16/bin/ansible all -i "$INVENTORY_DIR/legacy.yml" -i "$INVENTORY_DIR/modern.yml" \
+        --list-hosts | tail -n +2)
+
 echo "=== Waiting for target hosts to be reachable ==="
-for host in el6-legacy el7-webserver el7-minimal el9-inventory el10-inventory ubuntu2404-inventory; do
+for host in $HOSTS; do
     for i in $(seq 1 30); do
         if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no \
                -i /home/ansible/.ssh/id_ecdsa \

@@ -6,24 +6,9 @@ ARG SCENARIO=el9-inventory
 # sshd, sudo and the tools the inventory layer probes (ps, ss).
 RUN dnf install -y openssh-server sudo python3 procps-ng iproute
 
-# Create ansible user with sudo
-RUN useradd -m ansible && \
-    echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible && \
-    chmod 0440 /etc/sudoers.d/ansible
-
-# Configure sshd
-RUN ssh-keygen -A && \
-    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-    # pam_loginuid fails in containers — make it optional
-    sed -i 's/^\(session.*pam_loginuid.so\)$/session optional pam_loginuid.so/' /etc/pam.d/sshd
-
-# Install SSH public key
-RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh
-COPY tests/integration/ssh-keys/id_ecdsa.pub /home/ansible/.ssh/authorized_keys
-RUN chmod 600 /home/ansible/.ssh/authorized_keys && \
-    chown -R ansible:ansible /home/ansible/.ssh
+# User, sudo, sshd and the controller's key (shared by every target).
+COPY tests/integration/target-setup.sh tests/integration/ssh-keys/id_ecdsa.pub /tmp/
+RUN bash /tmp/target-setup.sh /tmp/id_ecdsa.pub
 
 # Provision script (scenario-specific config). It leaves the dnf metadata
 # cache in place: the playbook's yum/dnf queries are cache-only.

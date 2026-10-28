@@ -9,30 +9,9 @@ RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-Base.repo && 
 RUN yum install -y openssh-server sudo python procps iproute && \
     yum clean all
 
-# Create ansible user with sudo
-RUN useradd -m ansible && \
-    echo "ansible ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ansible && \
-    chmod 0440 /etc/sudoers.d/ansible
-
-# Generate SSH host keys. ECDSA first, matching production RHEL 6.5+ hosts;
-# modern OpenSSH clients reject the SHA-1 ssh-rsa/ssh-dss host keys.
-RUN ssh-keygen -t ecdsa -b 256 -f /etc/ssh/ssh_host_ecdsa_key -N "" && \
-    ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" && \
-    printf 'HostKey /etc/ssh/ssh_host_ecdsa_key\nHostKey /etc/ssh/ssh_host_rsa_key\n' >> /etc/ssh/sshd_config
-
-# Configure sshd
-RUN sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/^#*UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config && \
-    # pam_loginuid fails in containers — make it optional
-    sed -i 's/^\(session.*pam_loginuid.so\)$/session optional pam_loginuid.so/' /etc/pam.d/sshd
-
-# Install SSH public key
-RUN mkdir -p /home/ansible/.ssh && chmod 700 /home/ansible/.ssh
-COPY tests/integration/ssh-keys/id_ecdsa.pub /home/ansible/.ssh/authorized_keys
-RUN chmod 600 /home/ansible/.ssh/authorized_keys && \
-    chown -R ansible:ansible /home/ansible/.ssh
+# User, sudo, sshd and the controller's key (shared by every target).
+COPY tests/integration/target-setup.sh tests/integration/ssh-keys/id_ecdsa.pub /tmp/
+RUN bash /tmp/target-setup.sh /tmp/id_ecdsa.pub
 
 # Provision script (scenario-specific config)
 COPY tests/integration/scenarios/el6-legacy/provision.sh /tmp/provision.sh
