@@ -1,7 +1,7 @@
 ---
 services:
 
-  # --- Migration-profile targets (RHEL-family 6/7) ---------------------------
+  # --- RHEL-family targets (extended profile) ----------------------------------
 
   el6-legacy:
     build:
@@ -31,29 +31,29 @@ services:
     networks:
       - disco-test
 
-  # --- Inventory-profile targets (RHEL 9/10, Ubuntu) ---------------------------
-
-  el9-inventory:
+  el9-extended:
     build:
       context: ../..
       dockerfile: tests/integration/Containerfile.target-alma
       args:
         ALMA_VERSION: "9"
-        SCENARIO: el9-inventory
-    hostname: el9-inventory
+        SCENARIO: el9-extended
+    hostname: el9-extended
     networks:
       - disco-test
 
-  el10-inventory:
+  el10-extended:
     build:
       context: ../..
       dockerfile: tests/integration/Containerfile.target-alma
       args:
         ALMA_VERSION: "10"
-        SCENARIO: el10-inventory
-    hostname: el10-inventory
+        SCENARIO: el10-extended
+    hostname: el10-extended
     networks:
       - disco-test
+
+  # --- Inventory-profile target (extended requested, but not RHEL-family) ------
 
   ubuntu2404-inventory:
     build:
@@ -76,8 +76,8 @@ services:
       - el6-legacy
       - el7-webserver
       - el7-minimal
-      - el9-inventory
-      - el10-inventory
+      - el9-extended
+      - el10-extended
       - ubuntu2404-inventory
     volumes:
       - report-output:/home/ansible/playbook/output

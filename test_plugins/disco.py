@@ -9,7 +9,7 @@ module-specific checks:
 - any other module: its data key is present (stat stat, uri status,
   win_powershell output, win_service_info services, win_feature_info
   features). With failed_when: false a failed module leaves only `msg` behind.
-- batched migration probes: each entry from the disco_probes filter has an rc.
+- batched extended probes: each entry from the disco_probes filter has an rc.
 
 Probes whose non-zero rc still carries data (e.g. `subscription-manager status`
 when unregistered) don't use this test.

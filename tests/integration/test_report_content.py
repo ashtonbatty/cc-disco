@@ -96,12 +96,12 @@ def el7_min(facts):
 
 @pytest.fixture(scope="session")
 def el9(facts):
-    return facts["el9-inventory"]
+    return facts["el9-extended"]
 
 
 @pytest.fixture(scope="session")
 def el10(facts):
-    return facts["el10-inventory"]
+    return facts["el10-extended"]
 
 
 @pytest.fixture(scope="session")
@@ -121,7 +121,7 @@ class TestEveryHost:
 
     @pytest.mark.parametrize("host", EXPECTED_HOSTS)
     def test_validator(self, facts, host):
-        """Profile, inventory facts, migration facts only where expected, null convention."""
+        """Profile, inventory facts, extended facts only where expected, null convention."""
         assert check_host(host, facts[host]) == []
 
     @pytest.mark.parametrize("host", EXPECTED_HOSTS)
@@ -182,7 +182,7 @@ class TestEveryHost:
 
 
 # ===========================================================================
-# el7-webserver — feature-rich CentOS 7 (migration profile)
+# el7-webserver — feature-rich CentOS 7 (extended profile)
 # ===========================================================================
 
 class TestEl7Webserver:
@@ -208,6 +208,10 @@ class TestEl7Webserver:
     def test_pam_configs_collected(self, el7_web):
         files = [p["file"] for p in el7_web["disco_security"]["pam"]]
         assert "/etc/pam.d/sshd" in files
+
+    def test_authselect_null_on_el7(self, el7_web):
+        # RHEL 7 uses authconfig; authselect isn't installed.
+        assert el7_web["disco_security"]["authselect"] is None
 
     def test_crypto_policy_null_on_el7(self, el7_web):
         assert el7_web["disco_security"]["crypto_policy"] is None
@@ -246,7 +250,7 @@ class TestEl7Webserver:
 
 
 # ===========================================================================
-# el7-minimal — bare CentOS 7 (migration profile)
+# el7-minimal — bare CentOS 7 (extended profile)
 # ===========================================================================
 
 class TestEl7Minimal:
@@ -324,10 +328,10 @@ class TestEl6Legacy:
 
 
 # ===========================================================================
-# Inventory-profile hosts — RHEL 9/10 and Ubuntu (ansible-core 2.16)
+# RHEL 9/10 (extended profile) and Ubuntu (inventory profile), ansible-core 2.16
 # ===========================================================================
 
-class TestEl9Inventory:
+class TestEl9Extended:
 
     def test_distribution(self, el9):
         assert el9["distribution"] == "AlmaLinux"
@@ -348,12 +352,18 @@ class TestEl9Inventory:
     def test_security_updates_is_list(self, el9):
         assert isinstance(el9["disco_packages"]["security_updates"], list)
 
+    def test_extended_layer_on_el9(self, el9):
+        assert el9["disco_controls"]["profile"] == "extended"
+        assert el9["disco_security"]["authselect"] == {
+            "configured": True, "profile": "minimal", "features": ["with-mkhomedir"],
+        }
+
     def test_last_kernel_update_null_without_kernel(self, el9):
         # Container images ship no kernel package.
         assert el9["disco_packages"]["last_kernel_update"] is None
 
 
-class TestEl10Inventory:
+class TestEl10Extended:
 
     def test_distribution(self, el10):
         assert el10["distribution"] == "AlmaLinux"
@@ -364,6 +374,9 @@ class TestEl10Inventory:
 
     def test_nginx_installed(self, el10):
         assert "nginx" in el10["packages"]
+
+    def test_authselect_local_profile(self, el10):
+        assert el10["disco_security"]["authselect"] == {"configured": True, "profile": "local", "features": []}
 
 
 class TestUbuntuInventory:

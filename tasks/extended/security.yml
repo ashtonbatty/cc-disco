@@ -1,16 +1,19 @@
 ---
-# Security: sudoers, sshd, PAM
+# Security: sudoers, sshd, PAM, authselect
 #
 # All files are read in one task (see disco_probe_sh in vars/controls.yml),
 # including every sudoers.d / sshd_config.d drop-in, instead of one round trip
 # per file.
 
-- name: Probe sudoers, sshd, PAM and crypto policy
+- name: Probe sudoers, sshd, PAM, authselect and crypto policy
   # Drop-in and PAM files are recorded as <list>:<path>; the bare <list> entry
   # records that the list itself was collected (a missing directory is empty).
   ansible.builtin.shell: |
     set -o pipefail
     {{ disco_probe_sh }}
+    # Keeps the message: "No existing configuration detected." means authselect
+    # is installed but does not manage PAM/nsswitch (exit 2).
+    authselect_current() { authselect current --raw 2>&1; }
     probe sudoers cat /etc/sudoers
     probe sshd_config cat /etc/ssh/sshd_config
     if [ -n "$DISCO_DEEP" ]; then
@@ -29,6 +32,7 @@
         probe "pam:$f" cat "$f"
       done
     fi
+    probe authselect authselect_current
     [ -n "$DISCO_EL8" ] && probe crypto_policy update-crypto-policies --show
     exit 0
   args:
@@ -59,12 +63,21 @@
       {%- set sudoers = p.sudoers.stdout | default('') | trim -%}
       {%- set sshd = p.sshd_config.stdout | default('') | trim -%}
       {%- set crypto = p.crypto_policy.stdout | default('') | trim -%}
+      {%- set auth = p.authselect.stdout | default('') | trim -%}
+      {%- if p.authselect is disco_collected and auth -%}
+        {%- set authselect = {'configured': true, 'profile': auth.split() | first, 'features': auth.split()[1:]} -%}
+      {%- elif 'No existing configuration' in auth -%}
+        {%- set authselect = {'configured': false, 'profile': none, 'features': []} -%}
+      {%- else -%}
+        {%- set authselect = none -%}
+      {%- endif -%}
       {{ {
            'sudoers_main': sudoers if p.sudoers is disco_collected and sudoers else none,
            'sudoers_drop_ins': files.sudoers_d if p.sudoers_d is disco_collected else none,
            'sshd_config': sshd if p.sshd_config is disco_collected and sshd else none,
            'sshd_config_drop_ins': files.sshd_d if p.sshd_d is disco_collected else none,
            'pam': files.pam if p.pam is disco_collected else none,
+           'authselect': authselect,
            'crypto_policy': crypto if p.crypto_policy is disco_collected and crypto else none,
          } }}
   no_log: true

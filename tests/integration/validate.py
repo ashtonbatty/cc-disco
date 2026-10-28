@@ -3,7 +3,7 @@
 
 Checks:
 1. Every expected host has a facts file that parses as a JSON object
-2. The profile matches the host's OS, and only migration hosts carry migration facts
+2. The profile matches the host's OS, and only extended hosts carry extended facts
 3. The inventory layer is present on every host (packages, processes, sshd on :22, ...)
 4. No placeholder strings or empty strings stand in for null in disco_* facts
 5. A few scenario-specific assertions
@@ -15,11 +15,12 @@ import sys
 from pathlib import Path
 
 
-MIGRATION_HOSTS = ["el6-legacy", "el7-webserver", "el7-minimal"]
-INVENTORY_HOSTS = ["el9-inventory", "el10-inventory", "ubuntu2404-inventory"]
-EXPECTED_HOSTS = MIGRATION_HOSTS + INVENTORY_HOSTS
+# disco_profile=extended is set for every host; only the RHEL-family ones take it.
+EXTENDED_HOSTS = ["el6-legacy", "el7-webserver", "el7-minimal", "el9-extended", "el10-extended"]
+INVENTORY_HOSTS = ["ubuntu2404-inventory"]
+EXPECTED_HOSTS = EXTENDED_HOSTS + INVENTORY_HOSTS
 
-MIGRATION_FACTS = [
+EXTENDED_FACTS = [
     "disco_platform", "disco_kernel", "disco_network", "disco_firewall", "disco_storage",
     "disco_security", "disco_identity", "disco_satellite", "disco_backup",
     "disco_filesystem", "disco_readiness", "disco_apps",
@@ -48,7 +49,7 @@ def walk(obj, path=""):
 
 def check_host(host, facts):
     errors = []
-    expected_profile = "migration" if host in MIGRATION_HOSTS else "inventory"
+    expected_profile = "extended" if host in EXTENDED_HOSTS else "inventory"
 
     profile = (facts.get("disco_controls") or {}).get("profile")
     if profile != expected_profile:
@@ -58,11 +59,11 @@ def check_host(host, facts):
         if name not in facts:
             errors.append(f"{host}: missing inventory fact {name}")
 
-    for name in MIGRATION_FACTS:
-        if expected_profile == "migration" and name not in facts:
-            errors.append(f"{host}: missing migration fact {name}")
+    for name in EXTENDED_FACTS:
+        if expected_profile == "extended" and name not in facts:
+            errors.append(f"{host}: missing extended fact {name}")
         if expected_profile == "inventory" and name in facts:
-            errors.append(f"{host}: unexpected migration fact {name}")
+            errors.append(f"{host}: unexpected extended fact {name}")
 
     if not facts.get("packages"):
         errors.append(f"{host}: packages is empty")
@@ -101,9 +102,13 @@ def check_scenarios(hosts):
     if "ntp" not in (readiness.get("deprecated_packages") or []):
         errors.append("el6-legacy: ntp missing from deprecated_packages")
 
-    el9 = (hosts.get("el9-inventory", {}).get("disco_packages") or {})
+    el9 = (hosts.get("el9-extended", {}).get("disco_packages") or {})
     if not any(p["name"] == "htop" for p in el9.get("third_party") or []):
-        errors.append("el9-inventory: EPEL htop not reported as third-party")
+        errors.append("el9-extended: EPEL htop not reported as third-party")
+
+    authselect = (hosts.get("el9-extended", {}).get("disco_security") or {}).get("authselect")
+    if authselect != {"configured": True, "profile": "minimal", "features": ["with-mkhomedir"]}:
+        errors.append(f"el9-extended: authselect {authselect!r}, expected minimal with-mkhomedir")
 
     ubuntu = (hosts.get("ubuntu2404-inventory", {}).get("disco_packages") or {})
     if not any(p["name"] == "disco-localtool" for p in ubuntu.get("third_party") or []):

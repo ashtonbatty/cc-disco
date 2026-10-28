@@ -6,15 +6,15 @@
 
 discovery_mode: "{{ disco_mode | default('full') }}"
 
-# The migration layer is opt-in (-e disco_profile=migration) and only applies to
-# RHEL-family 6/7/8; every other host stays on the inventory profile. The
-# distribution list is explicit: Amazon Linux 2 reports os_family RedHat with major version 2.
-disco_migration_distributions: [RedHat, CentOS, OracleLinux, Rocky, AlmaLinux, Scientific]
+# The extended layer is opt-in (-e disco_profile=extended) and only applies to
+# RHEL-family hosts (any version); every other host stays on the inventory
+# profile. The distribution list is explicit: Amazon Linux and Fedora report
+# os_family RedHat too.
+disco_extended_distributions: [RedHat, CentOS, OracleLinux, Rocky, AlmaLinux, Scientific]
 discovery_profile: >-
-  {{ 'migration'
-     if (disco_profile | default('inventory')) == 'migration'
-        and (ansible_facts.distribution | default('')) in disco_migration_distributions
-        and (ansible_facts.distribution_major_version | default('99') | int) <= 8
+  {{ 'extended'
+     if (disco_profile | default('inventory')) == 'extended'
+        and (ansible_facts.distribution | default('')) in disco_extended_distributions
      else 'inventory' }}
 
 rhel_major: "{{ ansible_facts.distribution_major_version | default('0') }}"
@@ -53,9 +53,9 @@ disco_os_vendor_pattern: "{{ disco_os_vendor_patterns[ansible_facts.distribution
 # apt package origins that belong to the OS vendor.
 disco_os_apt_origins: [Ubuntu, Debian]
 
-# --- Batched probes (migration layer) ----------------------------------------
+# --- Batched probes (extended layer) ----------------------------------------
 
-# Each migration section runs all its commands in one shell task: one round trip
+# Each extended section runs all its commands in one shell task: one round trip
 # per section instead of one per command. Every command prints one line,
 # name|rc|base64(output), which the disco_probes filter (filter_plugins/) turns
 # back into {name: {rc, stdout, stdout_lines}}.

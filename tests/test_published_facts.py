@@ -50,18 +50,20 @@ def test_disco_collected_undefined_register():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("distribution,major,expected", [
-    ("RedHat", "6", "migration"),
-    ("CentOS", "7", "migration"),
-    ("RedHat", "8", "migration"),
-    ("Rocky", "8", "migration"),
-    ("RedHat", "9", "inventory"),
-    ("RedHat", "10", "inventory"),
+    ("RedHat", "6", "extended"),
+    ("CentOS", "7", "extended"),
+    ("RedHat", "8", "extended"),
+    ("Rocky", "8", "extended"),
+    ("RedHat", "9", "extended"),
+    ("AlmaLinux", "10", "extended"),
+    ("RedHat", "10", "extended"),
     ("Amazon", "2", "inventory"),
+    ("Fedora", "42", "inventory"),
     ("Ubuntu", "24", "inventory"),
     ("Microsoft Windows Server 2022 Standard", "10", "inventory"),
 ])
-def test_migration_profile_applies_to_rhel_6_to_8_only(distribution, major, expected):
-    v = controls_vars({"distribution": distribution, "distribution_major_version": major}, {"disco_profile": "migration"})
+def test_extended_profile_applies_to_rhel_family_only(distribution, major, expected):
+    v = controls_vars({"distribution": distribution, "distribution_major_version": major}, {"disco_profile": "extended"})
     assert v["discovery_profile"].strip() == expected
 
 
@@ -86,9 +88,9 @@ def test_package_manager_helpers(pkg_mgr, family, yum):
 
 
 def test_controls_lightweight_mode(rhel8_facts):
-    ctx = _ctx(rhel8_facts, {"disco_mode": "lightweight", "disco_profile": "migration"}, ansible_run_tags=["all"])
+    ctx = _ctx(rhel8_facts, {"disco_mode": "lightweight", "disco_profile": "extended"}, ansible_run_tags=["all"])
     controls = publish("tasks/controls.yml", ctx)["disco_controls"]
-    assert controls["profile"] == "migration"
+    assert controls["profile"] == "extended"
     assert controls["mode"] == "lightweight"
     assert controls["collect_command_heavy_probes"] is False
     assert controls["omitted"] == ["deep_security", "deep_kernel", "deep_filesystem", "command_heavy_probes"]
@@ -321,10 +323,10 @@ def test_containers_runtime_with_none_running():
 
 
 # ---------------------------------------------------------------------------
-# Migration layer
+# Extended layer
 # ---------------------------------------------------------------------------
 
-# Batched probe output per migration section: name -> output, or (rc, output).
+# Batched probe output per extended section: name -> output, or (rc, output).
 FULL_PROBES = {
     "kernel": {
         "lsmod": "Module                  Size  Used by\nvmw_balloon            20480  0\nfloppy  1  0",
@@ -356,6 +358,7 @@ FULL_PROBES = {
         "pam": "",
         "pam:/etc/pam.d/system-auth": "auth required pam_env.so",
         "pam:/etc/pam.d/su": (1, ""),
+        "authselect": "sssd with-mkhomedir with-sudo",
         "crypto_policy": "DEFAULT",
     },
     "identity": {
@@ -392,7 +395,10 @@ EMPTY_PROBES = {
     "network": {"routes": "", "nmcli": (127, ""), "teaming": "", "ifcfg": ""},
     "firewall": {"iptables": (127, "")},
     "storage": {"fstab": (1, ""), "multipath": (127, "")},
-    "security": {"sudoers": "", "sshd_config": "", "sudoers_d": "", "sshd_d": "", "pam": ""},
+    "security": {
+        "sudoers": "", "sshd_config": "", "sudoers_d": "", "sshd_d": "", "pam": "",
+        "authselect": (127, "bash: authselect: command not found"),
+    },
     "identity": {"sssd": (1, ""), "realm": (127, ""), "krb5": "", "keytab": "false", "nsswitch": ""},
     "satellite": {
         "identity": (1, "This system is not yet registered."), "status": (127, ""),
@@ -407,7 +413,7 @@ EMPTY_PROBES = {
 
 
 def _registers(probe_sets, **registered):
-    """Registers for a migration run: one batched probe register per section, plus overrides."""
+    """Registers for a extended run: one batched probe register per section, plus overrides."""
     regs = {f"disco_{section}_probes": probes(entries) for section, entries in probe_sets.items()}
     return {**regs, **registered}
 
@@ -420,31 +426,31 @@ def _without(probe_sets, **names):
     }
 
 
-FULL_MIGRATION = _registers(
+FULL_EXTENDED = _registers(
     FULL_PROBES,
     disco_efi_dir=stat(True), disco_ec2_check=skipped(), disco_azure_check=skipped(),
     disco_backup_monitoring=cmd("crowdstrike\nsplunk"),
 )
-EMPTY_MIGRATION = _registers(
+EMPTY_EXTENDED = _registers(
     EMPTY_PROBES,
     disco_efi_dir=stat(False), disco_ec2_check=uri(-1), disco_azure_check=uri(-1),
     disco_backup_monitoring=cmd(""),
 )
 
-MIGRATION_FILES = sorted(p.stem for p in (TASKS_DIR / "migration").glob("*.yml"))
+EXTENDED_FILES = sorted(p.stem for p in (TASKS_DIR / "extended").glob("*.yml"))
 
 
-def _migration(facts, registered, extra=None):
+def _extended(facts, registered, extra=None):
     ctx = _ctx(facts, extra, **registered)
     published = {}
-    for name in MIGRATION_FILES:
-        published.update(publish(f"tasks/migration/{name}.yml", ctx))
+    for name in EXTENDED_FILES:
+        published.update(publish(f"tasks/extended/{name}.yml", ctx))
     return published
 
 
-def test_migration_full(rhel8_facts):
-    f = _migration(rhel8_facts, FULL_MIGRATION)
-    assert set(f) == {f"disco_{n}" for n in MIGRATION_FILES}
+def test_extended_full(rhel8_facts):
+    f = _extended(rhel8_facts, FULL_EXTENDED)
+    assert set(f) == {f"disco_{n}" for n in EXTENDED_FILES}
     assert f["disco_platform"] == {"boot_mode": "UEFI", "aws_imds": None, "azure_imds": None, "detected": "vmware"}
     assert f["disco_kernel"]["loaded_modules"] == ["vmw_balloon", "floppy"]
     assert f["disco_kernel"]["third_party_modules"][0]["author"] == "VMware, Inc."
@@ -473,21 +479,21 @@ def test_migration_full(rhel8_facts):
 
 
 def test_sssd_bind_password_is_redacted(rhel8_facts):
-    sssd = _migration(rhel8_facts, FULL_MIGRATION)["disco_identity"]["sssd_conf"]
+    sssd = _extended(rhel8_facts, FULL_EXTENDED)["disco_identity"]["sssd_conf"]
     assert "s3cret" not in sssd
     assert "ldap_default_authtok = <redacted>" in sssd
     assert "id_provider = ldap" in sssd
 
 
-def test_migration_empty_uses_null_and_empty_lists(rhel8_facts):
+def test_extended_empty_uses_null_and_empty_lists(rhel8_facts):
     facts = dict(rhel8_facts, packages={}, system_vendor="Dell Inc.", virtualization_role="host")
-    f = _migration(facts, EMPTY_MIGRATION)
+    f = _extended(facts, EMPTY_EXTENDED)
     assert f["disco_platform"] == {"boot_mode": "BIOS", "aws_imds": False, "azure_imds": False, "detected": "bare_metal"}
     nulls = [
         ("disco_kernel", "grub_defaults"), ("disco_kernel", "tuned_profile"),
         ("disco_network", "nmcli_connections"), ("disco_firewall", "firewalld_zones"),
         ("disco_firewall", "iptables_rules"), ("disco_storage", "fstab"), ("disco_storage", "multipath"),
-        ("disco_security", "sudoers_main"), ("disco_security", "crypto_policy"),
+        ("disco_security", "sudoers_main"), ("disco_security", "crypto_policy"), ("disco_security", "authselect"),
         ("disco_identity", "sssd_conf"), ("disco_identity", "realm_list"),
         ("disco_satellite", "subscription_identity"), ("disco_satellite", "rhsm_server"),
         ("disco_satellite", "katello_packages"), ("disco_readiness", "packages_32bit"),
@@ -507,7 +513,7 @@ def test_migration_empty_uses_null_and_empty_lists(rhel8_facts):
     assert_no_placeholders(f)
 
 
-def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
+def test_extended_lightweight_marks_skipped_probes_null(rhel8_facts):
     lightweight = _without(
         FULL_PROBES,
         kernel=["third_party_modules"], satellite=["non_satellite_repos"],
@@ -520,7 +526,7 @@ def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
         disco_efi_dir=stat(True), disco_ec2_check=skipped(), disco_azure_check=skipped(),
         disco_backup_monitoring=skipped(), disco_filesystem_probes=skipped(),
     )
-    f = _migration(rhel8_facts, registered, {"disco_mode": "lightweight"})
+    f = _extended(rhel8_facts, registered, {"disco_mode": "lightweight"})
     assert f["disco_kernel"]["third_party_modules"] is None
     assert f["disco_kernel"]["deprecated_modules"] is None
     assert f["disco_security"]["sudoers_drop_ins"] is None
@@ -536,7 +542,7 @@ def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
 @pytest.mark.parametrize("status,expected", [(200, "aws_ec2"), (401, "aws_ec2"), (-1, "kvm")])
 def test_platform_aws_detection(status, expected):
     facts = {"system_vendor": "Amazon EC2", "virtualization_role": "guest", "virtualization_type": "kvm"}
-    f = publish("tasks/migration/platform.yml", _ctx(
+    f = publish("tasks/extended/platform.yml", _ctx(
         facts, disco_efi_dir=stat(False), disco_ec2_check=uri(status), disco_azure_check=uri(-1),
     ))["disco_platform"]
     assert f["detected"] == expected
@@ -646,7 +652,7 @@ def test_windows_containers():
 def test_package_derived_facts_tolerate_null_packages(rhel8_facts):
     """package_facts can fail (published as packages: null); derived facts become null, not errors."""
     facts = dict(rhel8_facts, packages=None)
-    f = _migration(facts, FULL_MIGRATION)
+    f = _extended(facts, FULL_EXTENDED)
     assert f["disco_apps"]["common"] is None
     assert f["disco_satellite"]["katello_packages"] is None
     assert f["disco_readiness"]["deprecated_packages"] is None
@@ -673,30 +679,42 @@ def test_failed_probes_publish_null_not_empty(rhel8_facts):
         disco_efi_dir={"failed": False, "msg": "stat failed"}, disco_ec2_check=skipped(), disco_azure_check=skipped(),
         disco_backup_monitoring=cmd("", rc=127),
     )
-    f = _migration(rhel8_facts, registered)
+    f = _extended(rhel8_facts, registered)
     assert f["disco_backup"]["agents"] is None
     assert f["disco_kernel"]["third_party_modules"] is None
     assert f["disco_identity"]["krb5_keytab_exists"] is None
     assert f["disco_platform"]["boot_mode"] is None
 
 
+@pytest.mark.parametrize("probe,expected", [
+    ("sssd with-mkhomedir with-sudo", {"configured": True, "profile": "sssd", "features": ["with-mkhomedir", "with-sudo"]}),
+    ("local", {"configured": True, "profile": "local", "features": []}),
+    ((2, "No existing configuration detected."), {"configured": False, "profile": None, "features": []}),
+    ((127, "bash: authselect: command not found"), None),
+])
+def test_authselect(rhel8_facts, probe, expected):
+    security = dict(FULL_PROBES["security"], authselect=probe)
+    registered = dict(FULL_EXTENDED, disco_security_probes=probes(security))
+    assert _extended(rhel8_facts, registered)["disco_security"]["authselect"] == expected
+
+
 def test_sshd_drop_ins_null_where_not_checked(rhel8_facts):
     """RHEL 6/7 have no sshd_config.d, so it isn't listed and nothing was collected."""
-    registered = dict(FULL_MIGRATION, disco_security_probes=probes(_without(FULL_PROBES, security=["sshd_d"])["security"]))
-    assert _migration(rhel8_facts, registered)["disco_security"]["sshd_config_drop_ins"] is None
+    registered = dict(FULL_EXTENDED, disco_security_probes=probes(_without(FULL_PROBES, security=["sshd_d"])["security"]))
+    assert _extended(rhel8_facts, registered)["disco_security"]["sshd_config_drop_ins"] is None
 
 
 def test_batched_probe_output_is_never_templated(rhel8_facts):
     """File contents travel base64-encoded and stay literal, even with | or {{ }} in them."""
-    registered = dict(FULL_MIGRATION, disco_storage_probes=probes({"fstab": "a|b {{ 7 * 7 }}", "multipath": ""}))
-    assert _migration(rhel8_facts, registered)["disco_storage"]["fstab"] == "a|b {{ 7 * 7 }}"
+    registered = dict(FULL_EXTENDED, disco_storage_probes=probes({"fstab": "a|b {{ 7 * 7 }}", "multipath": ""}))
+    assert _extended(rhel8_facts, registered)["disco_storage"]["fstab"] == "a|b {{ 7 * 7 }}"
 
 
 def test_whole_probe_task_skipped_publishes_nulls(rhel8_facts):
     """A section whose probe task never ran (e.g. outside --tags) publishes null fields."""
-    f = publish("tasks/migration/network.yml", _ctx(rhel8_facts, disco_network_probes=skipped()))
+    f = publish("tasks/extended/network.yml", _ctx(rhel8_facts, disco_network_probes=skipped()))
     assert f["disco_network"] == {"routes": None, "nmcli_connections": None, "teaming": None, "ifcfg_files": None}
-    f = publish("tasks/migration/network.yml", _ctx(rhel8_facts))
+    f = publish("tasks/extended/network.yml", _ctx(rhel8_facts))
     assert f["disco_network"]["routes"] is None
 
 

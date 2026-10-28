@@ -37,7 +37,7 @@ FACT_MODULES = {
 }
 # Facts that deliberately mirror a standard module's name and shape.
 MIRROR_FACTS = {"packages", "services", "tcp_listen", "udp_listen"}
-SENSITIVE_SECTIONS = {"tasks/migration/security.yml", "tasks/migration/identity.yml"}
+SENSITIVE_SECTIONS = {"tasks/extended/security.yml", "tasks/extended/identity.yml"}
 
 
 def _module(task):
@@ -166,20 +166,20 @@ def _imports(play):
 
 
 def test_every_linux_task_file_is_imported():
-    imported = _imports(_play("Linux discovery")) | _imports(_play("Migration discovery"))
+    imported = _imports(_play("Linux discovery")) | _imports(_play("Extended discovery"))
     expected = {f for f in TASK_FILES if not f.startswith("tasks/windows/")}
     assert imported == expected
 
 
-def test_migration_layer_is_gated_once():
-    """One end_host at the top of the migration play, instead of a condition on every task."""
-    play = _play("Migration discovery")
+def test_extended_layer_is_gated_once():
+    """One end_host at the top of the extended play, instead of a condition on every task."""
+    play = _play("Extended discovery")
     gate = play["tasks"][0]
     assert gate["ansible.builtin.meta"] == "end_host"
-    assert "migration" in gate["when"] and gate["tags"] == ["always"]
-    assert _imports(play) == {f for f in TASK_FILES if f.startswith("tasks/migration/")}
+    assert "extended" in gate["when"] and gate["tags"] == ["always"]
+    assert _imports(play) == {f for f in TASK_FILES if f.startswith("tasks/extended/")}
     assert all("when" not in t for t in play["tasks"][1:])
-    assert not any(f.startswith("tasks/migration/") for f in _imports(_play("Linux discovery")))
+    assert not any(f.startswith("tasks/extended/") for f in _imports(_play("Linux discovery")))
 
 
 @pytest.mark.parametrize("task_file", TASK_FILES)
@@ -194,8 +194,8 @@ def test_collected_checks_use_disco_collected(task_file):
     assert not adhoc.search(text), f"{task_file}: use `<register> is disco_collected`"
 
 
-@pytest.mark.parametrize("task_file", [f for f in TASK_FILES if f.startswith("tasks/migration/")])
-def test_migration_sections_probe_in_one_task(task_file):
+@pytest.mark.parametrize("task_file", [f for f in TASK_FILES if f.startswith("tasks/extended/")])
+def test_extended_sections_probe_in_one_task(task_file):
     """Each section batches its commands into one shell task: one round trip, not one per command."""
     probes = [t for t in load_tasks(task_file) if _module(t) in PROBE_MODULES]
     assert len(probes) <= 1, f"{task_file}: {[t['name'] for t in probes]}"

@@ -5,7 +5,7 @@ Read-only Ansible discovery for Linux and Windows servers. Everything discovered
 Two layers:
 
 - **Inventory** (every host: RHEL 6–10, Ubuntu, Windows Server). Installed packages, component versions, services, running processes, listening ports, pending security updates and running containers, for vulnerability response.
-- **Migration** (opt-in with `-e disco_profile=migration`; RHEL-family 6/7/8 only). Configuration needed to plan an upgrade to RHEL 9/10: kernel modules, network config, firewall rules, storage config, sudo/sshd/PAM, identity, Satellite, agents, and readiness checks.
+- **Extended** (opt-in with `-e disco_profile=extended`; RHEL-family hosts, RHEL 6–10). Configuration needed to plan an upgrade to the next RHEL major: kernel modules, network config, firewall rules, storage config, sudo/sshd/PAM, identity, Satellite, agents, and readiness checks.
 
 Nothing is modified on target hosts. Data that `setup`, `package_facts` or `service_facts` already provide is never collected a second time; the playbook only adds what they lack.
 
@@ -18,7 +18,7 @@ ansible-playbook gather_facts.yml                        # all hosts
 ansible-playbook gather_facts.yml --limit rhel8          # a group
 ansible-playbook gather_facts.yml --tags packages,processes,ports
 ansible-playbook gather_facts.yml -e disco_mode=lightweight
-ansible-playbook gather_facts.yml -e disco_profile=migration   # add the migration layer on RHEL 6/7/8
+ansible-playbook gather_facts.yml -e disco_profile=extended   # add the extended layer on RHEL-family hosts
 ```
 
 Windows hosts must be in the `windows` inventory group with their connection settings (see `inventory/hosts.yml`).
@@ -32,7 +32,7 @@ Each run starts by clearing cached facts, so the output is a fresh snapshot: a `
 
 **Null convention.** `null` means *not collected*: the probe was skipped, the source was missing, or the command failed. An empty list means the probe ran and found nothing. Placeholder strings such as `"not found"` are never used. A probe that ran but failed (non-zero exit, unreadable file) also publishes `null`, not `[]`.
 
-> **Sensitive data.** The migration layer collects sudoers, sshd, PAM, SSSD and Kerberos configuration. `ldap_default_authtok` is redacted from `sssd.conf`, but treat the fact cache, AAP host facts and `output/facts/` with the same care as a credentials file.
+> **Sensitive data.** The extended layer collects sudoers, sshd, PAM, SSSD and Kerberos configuration. `ldap_default_authtok` is redacted from `sssd.conf`, but treat the fact cache, AAP host facts and `output/facts/` with the same care as a credentials file.
 
 ## Fact catalogue
 
@@ -55,9 +55,9 @@ Notes:
 - Containers are those visible to root. Rootless containers of other users aren't listed.
 - Ubuntu needs `python3-apt` for `package_facts`. It is present on server images; without it `packages` is null.
 
-### RHEL-family 6/7/8 (migration layer)
+### RHEL-family (extended layer)
 
-Only with `-e disco_profile=migration`. Other hosts stay on the inventory profile even when it's requested, and `disco_controls.profile` records which one ran.
+Only with `-e disco_profile=extended`. Other hosts stay on the inventory profile even when it's requested, and `disco_controls.profile` records which one ran.
 
 | Fact | Contents | Already in setup facts, so not collected |
 |---|---|---|
@@ -66,7 +66,7 @@ Only with `-e disco_profile=migration`. Other hosts stay on the inventory profil
 | `disco_network` | routes, nmcli profiles, teaming state, ifcfg files | interfaces, bonding, DNS / resolv.conf |
 | `disco_firewall` | firewalld zones, iptables rules, nftables ruleset | which firewall service runs (`services`) |
 | `disco_storage` | fstab, multipath topology | mounts and usage, block devices, LVM |
-| `disco_security` | sudoers (+ drop-ins), sshd_config (+ drop-ins), PAM, crypto policy | — |
+| `disco_security` | sudoers (+ drop-ins), sshd_config (+ drop-ins), PAM, authselect (`configured`, `profile`, `features`; null where authselect isn't installed, e.g. RHEL 6/7), crypto policy | — |
 | `disco_identity` | sssd.conf (redacted), realm list, krb5.conf, keytab present, nsswitch.conf | — |
 | `disco_satellite` | subscription identity/status, rhsm server, katello packages, non-Satellite repos | — |
 | `disco_backup` | backup/monitoring agents detected by path (NetBackup, Commvault, TSM, Veeam, Rubrik, Cohesity, Bacula, Amanda, Zabbix, Nagios, Splunk, Datadog, CrowdStrike, Qualys, Tanium) | — |
@@ -88,7 +88,7 @@ Skipped probes publish `null`, and `disco_controls.omitted` lists the knobs that
 
 ## Tags
 
-Each task file has one primary tag matching its name: `packages`, `services`, `processes`, `ports`, `components`, `containers`, and the migration sections (`platform`, `kernel`, `network`, `firewall`, `storage`, `security`, `identity`, `satellite`, `backup`, `filesystem`, `readiness`, `apps`). `deep_kernel`, `deep_security` and `deep_filesystem` select their section (each migration section probes in a single task).
+Each task file has one primary tag matching its name: `packages`, `services`, `processes`, `ports`, `components`, `containers`, and the extended sections (`platform`, `kernel`, `network`, `firewall`, `storage`, `security`, `identity`, `satellite`, `backup`, `filesystem`, `readiness`, `apps`). `deep_kernel`, `deep_security` and `deep_filesystem` select their section (each extended section probes in a single task).
 
 Some sections read data collected by another. The producing tasks already carry the consumer's tag, so `--tags readiness` pulls in what it needs:
 

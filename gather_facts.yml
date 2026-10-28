@@ -3,8 +3,8 @@
 #
 # Every Linux and Windows host gets the inventory layer (installed packages,
 # services, running processes, listening ports, component versions, containers)
-# for vulnerability response. With -e disco_profile=migration, RHEL-family 6/7/8
-# hosts also get the migration layer for RHEL 9/10 upgrade planning. All tasks
+# for vulnerability response. With -e disco_profile=extended, RHEL-family hosts
+# also get the extended layer: configuration for upgrade planning. All tasks
 # are read-only — nothing is modified on target hosts.
 #
 # Usage:
@@ -12,7 +12,7 @@
 #   ansible-playbook gather_facts.yml --limit rhel8
 #   ansible-playbook gather_facts.yml --tags packages,processes
 #   ansible-playbook gather_facts.yml -e disco_mode=lightweight
-#   ansible-playbook gather_facts.yml -e disco_profile=migration
+#   ansible-playbook gather_facts.yml -e disco_profile=extended
 #
 # Output: cacheable facts (jsonfile fact cache / AAP fact storage) and
 #         ./output/facts/<inventory_hostname>.json
@@ -64,10 +64,10 @@
       ansible.builtin.import_tasks: tasks/linux/containers.yml
 
 # ==============================================================================
-# Migration (opt-in: -e disco_profile=migration; RHEL-family 6/7/8 only)
+# Extended (opt-in: -e disco_profile=extended; RHEL-family hosts only)
 # ==============================================================================
 
-- name: Migration discovery
+- name: Extended discovery
   hosts: "all:!windows"
   strategy: free
   gather_facts: false
@@ -77,35 +77,35 @@
 
   tasks:
     # The one gate for the whole layer: every other host leaves the play here.
-    - name: Skip hosts outside the migration profile
+    - name: Skip hosts outside the extended profile
       ansible.builtin.meta: end_host
-      when: discovery_profile | trim != 'migration'
+      when: discovery_profile | trim != 'extended'
       tags: [always]
 
     - name: Import platform tasks
-      ansible.builtin.import_tasks: tasks/migration/platform.yml
+      ansible.builtin.import_tasks: tasks/extended/platform.yml
     - name: Import kernel tasks
-      ansible.builtin.import_tasks: tasks/migration/kernel.yml
+      ansible.builtin.import_tasks: tasks/extended/kernel.yml
     - name: Import network tasks
-      ansible.builtin.import_tasks: tasks/migration/network.yml
+      ansible.builtin.import_tasks: tasks/extended/network.yml
     - name: Import firewall tasks
-      ansible.builtin.import_tasks: tasks/migration/firewall.yml
+      ansible.builtin.import_tasks: tasks/extended/firewall.yml
     - name: Import storage tasks
-      ansible.builtin.import_tasks: tasks/migration/storage.yml
+      ansible.builtin.import_tasks: tasks/extended/storage.yml
     - name: Import security tasks
-      ansible.builtin.import_tasks: tasks/migration/security.yml
+      ansible.builtin.import_tasks: tasks/extended/security.yml
     - name: Import identity tasks
-      ansible.builtin.import_tasks: tasks/migration/identity.yml
+      ansible.builtin.import_tasks: tasks/extended/identity.yml
     - name: Import satellite tasks
-      ansible.builtin.import_tasks: tasks/migration/satellite.yml
+      ansible.builtin.import_tasks: tasks/extended/satellite.yml
     - name: Import backup tasks
-      ansible.builtin.import_tasks: tasks/migration/backup.yml
+      ansible.builtin.import_tasks: tasks/extended/backup.yml
     - name: Import filesystem tasks
-      ansible.builtin.import_tasks: tasks/migration/filesystem.yml
+      ansible.builtin.import_tasks: tasks/extended/filesystem.yml
     - name: Import readiness tasks
-      ansible.builtin.import_tasks: tasks/migration/readiness.yml
+      ansible.builtin.import_tasks: tasks/extended/readiness.yml
     - name: Import apps tasks
-      ansible.builtin.import_tasks: tasks/migration/apps.yml
+      ansible.builtin.import_tasks: tasks/extended/apps.yml
 
 # ==============================================================================
 # Windows

@@ -1,5 +1,5 @@
 ---
-# RHEL 9/10 Migration Readiness
+# Migration Readiness (for the next RHEL major)
 #
 # Package-derived lists use ansible_facts.packages (tag: packages). Interpreter,
 # OpenSSL and Java versions are in disco_components; time-service and

@@ -1,7 +1,7 @@
 ARG ALMA_VERSION=9
 FROM docker.io/library/almalinux:${ALMA_VERSION}
 
-ARG SCENARIO=el9-inventory
+ARG SCENARIO=el9-extended
 
 # sshd, sudo and the tools the inventory layer probes (ps, ss).
 RUN dnf install -y openssh-server sudo python3 procps-ng iproute

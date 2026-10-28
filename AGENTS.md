@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. Everything discovered is published as cacheable facts. An **inventory** layer (packages, services, processes, ports, component versions, containers) runs on every host, for vulnerability response. A **migration** layer is opt-in (`-e disco_profile=migration`) and runs only on RHEL-family 6/7/8, for RHEL 9/10 upgrade planning. It is its own play, gated once by an `end_host` at the top. Nothing is modified on target hosts.
+Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. Everything discovered is published as cacheable facts. An **inventory** layer (packages, services, processes, ports, component versions, containers) runs on every host, for vulnerability response. An **extended** layer is opt-in (`-e disco_profile=extended`) and runs only on RHEL-family hosts (RHEL 6–10), for upgrade planning. It is its own play, gated once by an `end_host` at the top. Nothing is modified on target hosts.
 
 ## Key Conventions
 
@@ -14,7 +14,7 @@ Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. 
 - **Null convention:** `null` means not collected (skipped, missing source, or failed command), and `[]` means collected and empty. Never use placeholder strings.
 - **Collected?** Gate every field (and every "… as unavailable" task) on `<register> is disco_collected`, the Jinja test in `test_plugins/disco.py`. It is false for skipped, never-run and failed probes. Don't write ad-hoc `rc` / `is defined` checks; a test enforces this.
 - **Untrusted content:** later tasks read *registers*, never published facts. Probe output can contain `{{ … }}`, and published facts aren't marked unsafe in every core version.
-- **One round trip per migration section:** a section's commands and file reads go in one shell task built on `disco_probe_sh` (`vars/controls.yml`); the publish task unpacks it with `| disco_probes` (`filter_plugins/disco.py`) and gates each field on `p.<name> is disco_collected`. Knobs and OS checks reach the script as environment variables.
+- **One round trip per extended section:** a section's commands and file reads go in one shell task built on `disco_probe_sh` (`vars/controls.yml`); the publish task unpacks it with `| disco_probes` (`filter_plugins/disco.py`) and gates each field on `p.<name> is disco_collected`. Knobs and OS checks reach the script as environment variables.
 - **Don't duplicate setup:** check `ansible -m setup`, `package_facts` and `service_facts` before adding a probe.
 
 ### Variable Naming
@@ -31,7 +31,7 @@ All registered variables, and all published facts except the mirror facts, use t
 - Windows task files (`tasks/windows/`) use `ansible.windows`. They are reached only via `include_tasks` in the Windows play, so controllers without that collection can still parse the playbook.
 
 ### Tag System
-Each task file uses a single primary tag matching its filename (e.g. `tasks/migration/network.yml` uses `[network]`). Linux and Windows files with the same name share a tag. A task whose output is consumed by another section also carries that section's tag (see the Tags table in README.md).
+Each task file uses a single primary tag matching its filename (e.g. `tasks/extended/network.yml` uses `[network]`). Linux and Windows files with the same name share a tag. A task whose output is consumed by another section also carries that section's tag (see the Tags table in README.md).
 
 ## Running Tests
 
@@ -46,14 +46,14 @@ make -C tests/integration test-integration   # Container targets, core 2.11 + 2.
 ## Project Structure
 
 ```
-gather_facts.yml          # Plays: reset cache → Linux discovery → Migration discovery → Windows discovery → export
+gather_facts.yml          # Plays: reset cache → Linux discovery → Extended discovery → Windows discovery → export
 vars/controls.yml         # Profile selection, knobs, package-manager helpers (shared by both plays)
 tasks/controls.yml        # Publishes disco_controls
 tasks/linux/              # Inventory layer, every Linux host
-tasks/migration/          # Migration layer, RHEL-family 6/7/8 only
+tasks/extended/           # Extended layer, RHEL-family hosts only
 tasks/windows/            # Inventory layer, Windows (included dynamically)
 test_plugins/disco.py     # disco_collected: did a registered probe run and return its data?
-filter_plugins/disco.py   # disco_probes: unpack a migration section's batched probe output
+filter_plugins/disco.py   # disco_probes: unpack a extended section's batched probe output
 tests/                    # Unit + integration tests
 inventory/                # Inventory files
 ```

@@ -73,7 +73,7 @@ class TestTaskSemantics:
     """Task-source regression tests for shell expressions."""
 
     def test_backup_task_uses_real_newline_output(self):
-        task = load_task("tasks/migration/backup.yml", "Detect backup and monitoring agents")
+        task = load_task("tasks/extended/backup.yml", "Detect backup and monitoring agents")
         shell = task["ansible.builtin.shell"]
         assert "printf '%s\\n'" in shell
         assert 'found="${found}' not in shell

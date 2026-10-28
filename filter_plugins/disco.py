@@ -1,6 +1,6 @@
 """Jinja filter `disco_probes`: unpack a batched probe task's output.
 
-Migration sections run all their commands in one shell task (one round trip
+Extended sections run all their commands in one shell task (one round trip
 instead of one per command). The disco_probe_sh helpers (vars/controls.yml)
 print one line per command, name|rc|base64(output), so output can't break the
 framing. This filter turns those lines back into {name: {rc, stdout,
