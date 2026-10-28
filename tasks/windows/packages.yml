@@ -74,7 +74,7 @@
         {%- set _ = result.update({p.name: result.get(p.name, []) + [entry]}) -%}
       {%- endfor -%}
       {{ result }}
-  when: disco_win_programs.output is defined
+  when: disco_win_programs is disco_collected
   tags: [packages]
 
 - name: Publish installed programs as unavailable
@@ -82,7 +82,7 @@
   ansible.builtin.set_fact:
     cacheable: true
     packages: null
-  when: disco_win_programs.output is not defined
+  when: disco_win_programs is not disco_collected
   tags: [packages]
 
 - name: Publish Windows package facts
@@ -91,8 +91,8 @@
     disco_packages: >-
       {{ {
            'hotfixes': (disco_win_hotfixes.output | sort(attribute='id'))
-             if disco_win_hotfixes.output is defined else none,
+             if disco_win_hotfixes is disco_collected else none,
            'features': (disco_win_features.features | selectattr('installed') | map(attribute='name') | sort)
-             if disco_win_features.features is defined and disco_win_features.exists | default(false) else none,
+             if disco_win_features is disco_collected and disco_win_features.exists | default(false) else none,
          } }}
   tags: [packages]

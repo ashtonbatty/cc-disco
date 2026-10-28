@@ -42,8 +42,8 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_platform: >-
-      {%- set aws = none if disco_ec2_check.status is not defined else (disco_ec2_check.status | int) in [200, 401] -%}
-      {%- set azure = none if disco_azure_check.status is not defined else (disco_azure_check.status | int) == 200 -%}
+      {%- set aws = (disco_ec2_check.status | int) in [200, 401] if disco_ec2_check is disco_collected else none -%}
+      {%- set azure = (disco_azure_check.status | int) == 200 if disco_azure_check is disco_collected else none -%}
       {%- set vendor = ansible_facts.system_vendor | default('') -%}
       {%- if aws -%}{%- set detected = 'aws_ec2' -%}
       {%- elif azure -%}{%- set detected = 'azure_vm' -%}
@@ -52,7 +52,7 @@
       {%- else -%}{%- set detected = 'bare_metal' -%}
       {%- endif -%}
       {{ {
-           'boot_mode': 'UEFI' if disco_efi_dir.stat.exists | default(false) else 'BIOS',
+           'boot_mode': ('UEFI' if disco_efi_dir.stat.exists else 'BIOS') if disco_efi_dir is disco_collected else none,
            'aws_imds': aws,
            'azure_imds': azure,
            'detected': detected,

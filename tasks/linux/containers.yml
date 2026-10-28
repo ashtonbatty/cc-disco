@@ -28,7 +28,7 @@
     disco_containers: >-
       {%- set result = [] -%}
       {%- set seen = [] -%}
-      {%- if (disco_podman_ps.rc | default(1)) == 0 -%}
+      {%- if disco_podman_ps is disco_collected -%}
         {%- for c in (disco_podman_ps.stdout | default('') | trim or '[]') | from_json -%}
           {%- set id = c.Id | default(c.ID | default('')) -%}
           {%- set names = c.Names | default([]) -%}
@@ -44,7 +44,7 @@
               }) -%}
         {%- endfor -%}
       {%- endif -%}
-      {%- if (disco_docker_ps.rc | default(1)) == 0 -%}
+      {%- if disco_docker_ps is disco_collected -%}
         {%- for line in disco_docker_ps.stdout_lines | default([]) if line | trim -%}
           {%- set c = line | from_json -%}
           {%- set id = c.ID | default(c.Id | default('')) -%}
@@ -63,7 +63,7 @@
         {%- endfor -%}
       {%- endif -%}
       {{ result }}
-  when: (disco_podman_ps.rc | default(1)) == 0 or (disco_docker_ps.rc | default(1)) == 0
+  when: disco_podman_ps is disco_collected or disco_docker_ps is disco_collected
   tags: [containers]
 
 - name: Publish container facts as unavailable
@@ -71,5 +71,5 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_containers: null
-  when: (disco_podman_ps.rc | default(1)) != 0 and (disco_docker_ps.rc | default(1)) != 0
+  when: disco_podman_ps is not disco_collected and disco_docker_ps is not disco_collected
   tags: [containers]

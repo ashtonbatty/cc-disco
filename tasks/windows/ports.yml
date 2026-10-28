@@ -8,3 +8,12 @@
   ansible.windows.win_listen_ports_facts:
   failed_when: false
   tags: [ports]
+
+- name: Publish listening port facts as unavailable
+  # win_listen_ports_facts sets no fact when it fails. A literal null keeps the null convention.
+  ansible.builtin.set_fact:
+    cacheable: true
+    tcp_listen: null
+    udp_listen: null
+  when: ansible_facts.tcp_listen is not defined
+  tags: [ports]

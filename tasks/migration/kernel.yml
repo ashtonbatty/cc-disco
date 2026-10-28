@@ -62,16 +62,16 @@
             }) -%}
       {%- endfor -%}
       {%- set loaded = (disco_lsmod.stdout_lines[1:] | map('regex_replace', '\\s.*$', '') | list)
-           if (disco_lsmod.rc | default(1)) == 0 else none -%}
+           if disco_lsmod is disco_collected else none -%}
       {%- set deprecated = ['floppy', 'mptbase', 'mptscsih', 'mptspi', 'megaraid', 'aacraid', '3w_9xxx', '3w_sas'] -%}
       {%- set grub = disco_grub_defaults.content | default('') | b64decode | trim -%}
       {%- set tuned = disco_tuned_profile.stdout | default('') | regex_replace('^Current active profile:\\s*', '') | trim -%}
       {{ {
            'loaded_modules': loaded,
-           'third_party_modules': third_party if disco_third_party_modules.rc is defined else none,
+           'third_party_modules': third_party if disco_third_party_modules is disco_collected else none,
            'deprecated_modules': (deprecated | select('in', loaded) | list)
              if loaded is not none and collect_deep_kernel | bool else none,
-           'grub_defaults': grub or none,
-           'tuned_profile': tuned if (disco_tuned_profile.rc | default(1)) == 0 and tuned else none,
+           'grub_defaults': grub if disco_grub_defaults is disco_collected and grub else none,
+           'tuned_profile': tuned if disco_tuned_profile is disco_collected and tuned else none,
          } }}
   tags: [kernel, deep_kernel]

@@ -49,11 +49,11 @@
       {%- set krb5 = disco_krb5_conf.content | default('') | b64decode | trim -%}
       {%- set nss = disco_nsswitch_conf.content | default('') | b64decode | trim -%}
       {{ {
-           'sssd_conf': sssd or none,
-           'realm_list': realm if (disco_realm_list.rc | default(1)) == 0 and realm else none,
-           'krb5_conf': krb5 or none,
-           'krb5_keytab_exists': disco_krb5_keytab.stat.exists | default(none),
-           'nsswitch_conf': nss or none,
+           'sssd_conf': sssd if disco_sssd_conf is disco_collected and sssd else none,
+           'realm_list': realm if disco_realm_list is disco_collected and realm else none,
+           'krb5_conf': krb5 if disco_krb5_conf is disco_collected and krb5 else none,
+           'krb5_keytab_exists': disco_krb5_keytab.stat.exists if disco_krb5_keytab is disco_collected else none,
+           'nsswitch_conf': nss if disco_nsswitch_conf is disco_collected and nss else none,
          } }}
   no_log: true
   tags: [identity]

@@ -30,7 +30,7 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_components: >-
-      {%- set c = (disco_win_components.output | default([{}]) | first) or {} -%}
+      {%- set c = (disco_win_components.output | first | default({}, true)) if disco_win_components is disco_collected else {} -%}
       {{ {
            'os': {
              'product_name': c.product_name | default(none),

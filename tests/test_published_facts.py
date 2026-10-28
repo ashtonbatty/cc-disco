@@ -7,7 +7,7 @@ lists are always lists, and no English placeholders or empty strings stand in fo
 import pytest
 
 from conftest import (
-    TASKS_DIR, assert_no_placeholders, cmd, controls_vars, find, loop_results, missing_cmd,
+    PLAYBOOK_TESTS, TASKS_DIR, assert_no_placeholders, cmd, controls_vars, find, loop_results, missing_cmd,
     publish, skipped, slurp, slurp_missing, stat, uri,
 )
 
@@ -15,6 +15,32 @@ from conftest import (
 def _ctx(facts, extra=None, **registered):
     """Context for a host: rendered vars/controls.yml + setup facts + registered results."""
     return {**controls_vars(facts, extra), "ansible_facts": facts, **registered}
+
+
+# ---------------------------------------------------------------------------
+# disco_collected: the one "was this probe collected?" check
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("result,expected", [
+    (cmd("out"), True),
+    (cmd(""), True),
+    (cmd("", rc=1), False),
+    (missing_cmd(), False),
+    (skipped(), False),
+    (None, False),
+    (slurp("x"), True),
+    (slurp(""), True),
+    (slurp_missing(), False),
+    (find([]), True),
+    ({"failed": False, "msg": "/data was skipped as it does not exist"}, False),
+    (stat(False), True),
+    (uri(-1), True),
+    ({"output": []}, True),
+    (loop_results([]), True),
+    ({"results": [], "skipped": True}, False),
+])
+def test_disco_collected(result, expected):
+    assert PLAYBOOK_TESTS["disco_collected"](result) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +339,10 @@ FULL_MIGRATION = {
     "disco_fstab": slurp("/dev/sda1 / xfs defaults 0 0\n# nfs comment\nnas:/export /mnt/nas nfs defaults,_netdev 0 0"),
     "disco_multipath": cmd("", rc=1),
     "disco_sudoers_main": slurp("root ALL=(ALL) ALL"),
+    "disco_sudoers_d_files": find(["/etc/sudoers.d/admins"]),
     "disco_sudoers_d_contents": loop_results([({"path": "/etc/sudoers.d/admins"}, "%admins ALL=(ALL) NOPASSWD: ALL")]),
     "disco_sshd_config": slurp("PermitRootLogin no"),
+    "disco_sshd_d_files": find([]),
     "disco_sshd_d_contents": loop_results([]),
     "disco_pam_contents": loop_results([("/etc/pam.d/system-auth", "auth required pam_env.so"), ("/etc/pam.d/su", None)]),
     "disco_crypto_policy": cmd("DEFAULT"),
@@ -357,8 +385,10 @@ EMPTY_MIGRATION = {
     "disco_fstab": slurp_missing(),
     "disco_multipath": missing_cmd(),
     "disco_sudoers_main": slurp(""),
+    "disco_sudoers_d_files": find([]),
     "disco_sudoers_d_contents": loop_results([]),
     "disco_sshd_config": slurp(""),
+    "disco_sshd_d_files": find([]),
     "disco_sshd_d_contents": loop_results([]),
     "disco_pam_contents": loop_results([]),
     "disco_crypto_policy": skipped(),
@@ -460,7 +490,8 @@ def test_migration_empty_uses_null_and_empty_lists(rhel8_facts):
 
 def test_migration_lightweight_marks_skipped_probes_null(rhel8_facts):
     registered = dict(FULL_MIGRATION)
-    for name in ("disco_third_party_modules", "disco_non_satellite_repos",
+    for name in ("disco_third_party_modules", "disco_non_satellite_repos", "disco_sudoers_d_files",
+                 "disco_sshd_d_files", "disco_pam_contents",
                  "disco_backup_monitoring", "disco_opt_listing", "disco_data_listing", "disco_third_party_paths",
                  "disco_xinetd", "disco_alternatives", "disco_root_crontab", "disco_system_crontab", "disco_cron_d"):
         registered[name] = skipped()
@@ -608,3 +639,30 @@ def test_package_derived_facts_tolerate_null_packages(rhel8_facts):
 def test_services_and_packages_fallbacks_publish_null():
     assert publish("tasks/linux/services.yml", {"ansible_facts": {}}) == {"services": None}
     assert publish("tasks/linux/services.yml", {"ansible_facts": {"services": {}}}) == {}
+
+
+def test_failed_probes_publish_null_not_empty(rhel8_facts):
+    """A probe that ran and failed is "not collected", never "collected and empty"."""
+    registered = dict(FULL_MIGRATION)
+    registered.update({
+        "disco_backup_monitoring": cmd("", rc=127),
+        "disco_third_party_modules": cmd("", rc=1),
+        "disco_sudoers_d_files": {"failed": False, "msg": "permission denied"},
+        "disco_efi_dir": {"failed": False, "msg": "stat failed"},
+    })
+    f = _migration(rhel8_facts, registered)
+    assert f["disco_backup"]["agents"] is None
+    assert f["disco_kernel"]["third_party_modules"] is None
+    assert f["disco_security"]["sudoers_drop_ins"] is None
+    assert f["disco_platform"]["boot_mode"] is None
+
+
+def test_sshd_drop_ins_null_where_not_checked(rhel8_facts):
+    """RHEL 6/7 have no sshd_config.d, so the find is skipped and nothing was collected."""
+    registered = dict(FULL_MIGRATION, disco_sshd_d_files=skipped(), disco_sshd_d_contents={"results": [], "skipped": True})
+    assert _migration(rhel8_facts, registered)["disco_security"]["sshd_config_drop_ins"] is None
+
+
+def test_windows_ports_fallback_publishes_null():
+    assert publish("tasks/windows/ports.yml", {"ansible_facts": {}}) == {"tcp_listen": None, "udp_listen": None}
+    assert publish("tasks/windows/ports.yml", {"ansible_facts": {"tcp_listen": [], "udp_listen": []}}) == {}

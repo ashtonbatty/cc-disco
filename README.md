@@ -30,7 +30,7 @@ Windows hosts must be in the `windows` inventory group with their connection set
 
 Each run starts by clearing cached facts, so the output is a fresh snapshot: a `--tags` run contains only the selected sections, plus setup facts and `disco_controls`.
 
-**Null convention.** `null` means *not collected*: the probe was skipped, the source was missing, or the command failed. An empty list means the probe ran and found nothing. Placeholder strings such as `"not found"` are never used.
+**Null convention.** `null` means *not collected*: the probe was skipped, the source was missing, or the command failed. An empty list means the probe ran and found nothing. Placeholder strings such as `"not found"` are never used. A probe that ran but failed (non-zero exit, unreadable file) also publishes `null`, not `[]`.
 
 > **Sensitive data.** The migration layer collects sudoers, sshd, PAM, SSSD and Kerberos configuration. `ldap_default_authtok` is redacted from `sssd.conf`, but treat the fact cache, AAP host facts and `output/facts/` with the same care as a credentials file.
 

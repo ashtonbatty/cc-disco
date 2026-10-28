@@ -26,7 +26,7 @@
       {%- set fstab = disco_fstab.content | default('') | b64decode | trim -%}
       {%- set mpath = disco_multipath.stdout | default('') | trim -%}
       {{ {
-           'fstab': fstab or none,
-           'multipath': mpath if (disco_multipath.rc | default(1)) == 0 and mpath else none,
+           'fstab': fstab if disco_fstab is disco_collected and fstab else none,
+           'multipath': mpath if disco_multipath is disco_collected and mpath else none,
          } }}
   tags: [storage]

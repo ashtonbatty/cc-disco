@@ -30,7 +30,7 @@
             }}) -%}
       {%- endfor -%}
       {{ result }}
-  when: disco_win_services.services is defined
+  when: disco_win_services is disco_collected
   tags: [services]
 
 - name: Publish Windows services as unavailable
@@ -38,5 +38,5 @@
   ansible.builtin.set_fact:
     cacheable: true
     services: null
-  when: disco_win_services.services is not defined
+  when: disco_win_services is not disco_collected
   tags: [services]

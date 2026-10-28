@@ -53,8 +53,8 @@
       {%- set openssl = disco_openssl_version.stdout | default('') | trim -%}
       {%- set java = (disco_java_active.stderr | default('') ~ disco_java_active.stdout | default('')) | trim -%}
       {{ {
-           'openssl': openssl if (disco_openssl_version.rc | default(1)) == 0 and openssl else none,
-           'java': java if (disco_java_active.rc | default(1)) == 0 and java else none,
-           'python': python if python else none,
+           'openssl': openssl if disco_openssl_version is disco_collected and openssl else none,
+           'java': java if disco_java_active is disco_collected and java else none,
+           'python': python if disco_python_versions is disco_collected and python else none,
          } }}
   tags: [components]

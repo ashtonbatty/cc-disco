@@ -19,6 +19,7 @@
     [ -d /opt/Tanium ] && printf '%s\n' "tanium"
     [ -d /opt/bacula ] && printf '%s\n' "bacula"
     [ -d /opt/amanda ] && printf '%s\n' "amanda"
+    exit 0
   args:
     executable: /bin/bash
   register: disco_backup_monitoring
@@ -33,6 +34,6 @@
     disco_backup: >-
       {{ {
            'agents': (disco_backup_monitoring.stdout_lines | map('trim') | reject('equalto', '') | list)
-             if disco_backup_monitoring.rc is defined else none,
+             if disco_backup_monitoring is disco_collected else none,
          } }}
   tags: [backup]

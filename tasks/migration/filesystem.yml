@@ -48,9 +48,9 @@
       {%- set third_party = disco_third_party_paths.stdout | default('') | trim -%}
       {{ {
            'opt': (disco_opt_listing.files | map(attribute='path') | sort)
-             if disco_opt_listing.files is defined else none,
+             if disco_opt_listing is disco_collected else none,
            'data': (disco_data_listing.files | map(attribute='path') | sort)
-             if disco_data_listing.files is defined else none,
-           'third_party_paths': (third_party or none) if disco_third_party_paths.rc is defined else none,
+             if disco_data_listing is disco_collected else none,
+           'third_party_paths': third_party if disco_third_party_paths is disco_collected and third_party else none,
          } }}
   tags: [filesystem, deep_filesystem]

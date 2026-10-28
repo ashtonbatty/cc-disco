@@ -38,8 +38,8 @@
       {%- set ipt = disco_iptables_rules.stdout | default('') | trim -%}
       {%- set nft = disco_nftables_rules.stdout | default('') | trim -%}
       {{ {
-           'firewalld_zones': zones if (disco_firewalld_zones.rc | default(1)) == 0 and zones else none,
-           'iptables_rules': ipt if (disco_iptables_rules.rc | default(1)) == 0 and ipt else none,
-           'nftables_rules': nft if (disco_nftables_rules.rc | default(1)) == 0 and nft else none,
+           'firewalld_zones': zones if disco_firewalld_zones is disco_collected and zones else none,
+           'iptables_rules': ipt if disco_iptables_rules is disco_collected and ipt else none,
+           'nftables_rules': nft if disco_nftables_rules is disco_collected and nft else none,
          } }}
   tags: [firewall]

@@ -169,6 +169,18 @@ def test_every_linux_task_file_is_imported():
     assert imported == expected
 
 
+@pytest.mark.parametrize("task_file", TASK_FILES)
+def test_collected_checks_use_disco_collected(task_file):
+    """One answer to "was this probe collected?": the disco_collected test plugin.
+
+    Ad-hoc forms drift apart (rc is defined vs rc == 0, files is defined, ...)
+    and then publish [] for a probe that failed.
+    """
+    adhoc = re.compile(r"\.rc\b|(?<!ansible_facts)\.\w+ is (not )?defined")
+    text = (REPO_ROOT / task_file).read_text()
+    assert not adhoc.search(text), f"{task_file}: use `<register> is disco_collected`"
+
+
 def test_yum_and_dnf_only_run_through_disco_yum():
     pattern = re.compile(r"(^|[\s;&|(])(yum|dnf)\s")
     for task_file, task in _all_tasks():

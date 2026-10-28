@@ -92,21 +92,20 @@
     disco_security: >-
       {%- set files = {'sudoers_d': [], 'sshd_d': [], 'pam': []} -%}
       {%- for key, reg in [('sudoers_d', disco_sudoers_d_contents), ('sshd_d', disco_sshd_d_contents), ('pam', disco_pam_contents)] -%}
-        {%- for item in reg.results | default([]) if item.content is defined -%}
+        {%- for item in reg.results | default([]) if item is disco_collected -%}
           {%- set _ = files[key].append({'file': item.source, 'content': item.content | b64decode}) -%}
         {%- endfor -%}
       {%- endfor -%}
       {%- set sudoers = disco_sudoers_main.content | default('') | b64decode | trim -%}
       {%- set sshd = disco_sshd_config.content | default('') | b64decode | trim -%}
       {%- set crypto = disco_crypto_policy.stdout | default('') | trim -%}
-      {%- set deep = collect_deep_security | bool -%}
-      {{ {
-           'sudoers_main': sudoers or none,
-           'sudoers_drop_ins': files.sudoers_d if deep else none,
-           'sshd_config': sshd or none,
-           'sshd_config_drop_ins': files.sshd_d if deep else none,
-           'pam': files.pam if deep else none,
-           'crypto_policy': crypto if (disco_crypto_policy.rc | default(1)) == 0 and crypto else none,
+            {{ {
+           'sudoers_main': sudoers if disco_sudoers_main is disco_collected and sudoers else none,
+           'sudoers_drop_ins': files.sudoers_d if disco_sudoers_d_files is disco_collected else none,
+           'sshd_config': sshd if disco_sshd_config is disco_collected and sshd else none,
+           'sshd_config_drop_ins': files.sshd_d if disco_sshd_d_files is disco_collected else none,
+           'pam': files.pam if disco_pam_contents is disco_collected else none,
+           'crypto_policy': crypto if disco_crypto_policy is disco_collected and crypto else none,
          } }}
   no_log: true
   tags: [security, deep_security]

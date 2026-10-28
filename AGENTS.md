@@ -12,6 +12,7 @@ Read-only Ansible discovery for Linux (RHEL 6–10, Ubuntu) and Windows Server. 
 - **Single expression:** write each published value as one Jinja expression (or `{% set %}` statements ending in a single `{{ value }}`) that yields the whole dict or list. That keeps types and `null`s intact on ansible-core 2.11–2.18 (non-native templating) and on 2.19+.
 - **Literal null:** a fact whose *entire* value may be `null` needs a separate "… as unavailable" task that sets a literal YAML `null`. A templated `none` renders as `""` before 2.19.
 - **Null convention:** `null` means not collected (skipped, missing source, or failed command), and `[]` means collected and empty. Never use placeholder strings.
+- **Collected?** Gate every field (and every "… as unavailable" task) on `<register> is disco_collected`, the Jinja test in `test_plugins/disco.py`. It is false for skipped, never-run and failed probes. Don't write ad-hoc `rc` / `is defined` checks; a test enforces this.
 - **Untrusted content:** later tasks read *registers*, never published facts. Probe output can contain `{{ … }}`, and published facts aren't marked unsafe in every core version.
 - **Don't duplicate setup:** check `ansible -m setup`, `package_facts` and `service_facts` before adding a probe.
 
@@ -50,6 +51,7 @@ tasks/controls.yml        # Publishes disco_controls
 tasks/linux/              # Inventory layer, every Linux host
 tasks/migration/          # Migration layer, RHEL-family 6/7/8 only
 tasks/windows/            # Inventory layer, Windows (included dynamically)
+test_plugins/disco.py     # disco_collected: did a registered probe run and return its data?
 tests/                    # Unit + integration tests
 inventory/                # Inventory files
 ```

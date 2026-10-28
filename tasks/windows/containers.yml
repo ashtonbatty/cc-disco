@@ -29,7 +29,7 @@
             }) -%}
       {%- endfor -%}
       {{ result }}
-  when: (disco_docker_ps.rc | default(1)) == 0
+  when: disco_docker_ps is disco_collected
   tags: [containers]
 
 - name: Publish container facts as unavailable
@@ -37,5 +37,5 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_containers: null
-  when: (disco_docker_ps.rc | default(1)) != 0
+  when: disco_docker_ps is not disco_collected
   tags: [containers]

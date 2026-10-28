@@ -33,7 +33,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ result }}
-  when: (disco_ps.rc | default(1)) == 0
+  when: disco_ps is disco_collected
   tags: [processes]
 
 - name: Publish process facts as unavailable
@@ -41,5 +41,5 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_processes: null
-  when: (disco_ps.rc | default(1)) != 0
+  when: disco_ps is not disco_collected
   tags: [processes]

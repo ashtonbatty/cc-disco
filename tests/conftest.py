@@ -5,6 +5,7 @@ the Ansible filters and tests they use, so tests see the same native types
 (dicts, lists, None) that Ansible stores as facts.
 """
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -18,6 +19,16 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASKS_DIR = REPO_ROOT / "tasks"
+
+
+def _load_test_plugin(name):
+    spec = importlib.util.spec_from_file_location(f"disco_test_plugin_{name}", REPO_ROOT / "test_plugins" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.TestModule().tests()
+
+
+PLAYBOOK_TESTS = _load_test_plugin("disco")
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +95,7 @@ def make_env():
         "regex_replace": _regex_replace,
         "regex_search": _regex_search,
     })
-    env.tests.update({"search": _search, "match": _match})
+    env.tests.update({"search": _search, "match": _match, **PLAYBOOK_TESTS})
     return env
 
 

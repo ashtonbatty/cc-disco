@@ -50,11 +50,11 @@
     disco_network: >-
       {%- set team = disco_team_details.stdout | default('') | trim -%}
       {{ {
-           'routes': disco_routes.stdout_lines if (disco_routes.rc | default(1)) == 0 else none,
+           'routes': disco_routes.stdout_lines if disco_routes is disco_collected else none,
            'nmcli_connections': disco_nmcli_connections.stdout_lines
-             if (disco_nmcli_connections.rc | default(1)) == 0 else none,
-           'teaming': team or none,
+             if disco_nmcli_connections is disco_collected else none,
+           'teaming': team if disco_team_details is disco_collected and team else none,
            'ifcfg_files': disco_ifcfg_files.files | map(attribute='path') | sort
-             if disco_ifcfg_files.files is defined else none,
+             if disco_ifcfg_files is disco_collected else none,
          } }}
   tags: [network]

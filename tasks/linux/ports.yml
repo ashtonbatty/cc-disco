@@ -62,7 +62,7 @@
         {%- endif -%}
       {%- endfor -%}
       {{ result }}
-  when: (disco_listen.rc | default(1)) == 0
+  when: disco_listen is disco_collected
   tags: [ports]
 
 - name: Publish listening port facts as unavailable
@@ -71,5 +71,5 @@
     cacheable: true
     tcp_listen: null
     udp_listen: null
-  when: (disco_listen.rc | default(1)) != 0
+  when: disco_listen is not disco_collected
   tags: [ports]

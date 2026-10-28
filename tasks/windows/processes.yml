@@ -39,7 +39,7 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_processes: "{{ disco_win_processes.output | sort(attribute='pid') }}"
-  when: disco_win_processes.output is defined
+  when: disco_win_processes is disco_collected
   tags: [processes]
 
 - name: Publish process facts as unavailable
@@ -47,5 +47,5 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_processes: null
-  when: disco_win_processes.output is not defined
+  when: disco_win_processes is not disco_collected
   tags: [processes]

@@ -170,15 +170,15 @@
       {%- set kernel = disco_last_kernel_update.stdout | default('') | trim -%}
       {{ {
            'third_party': third_party
-             if (disco_pkg_family == 'rpm' and (disco_rpm_vendors.rc | default(1)) == 0)
+             if (disco_pkg_family == 'rpm' and disco_rpm_vendors is disco_collected)
                 or (disco_pkg_family == 'apt' and pkgs | length > 0)
              else none,
            'repos': repos
-             if (disco_repos_enabled.rc | default(1)) == 0 or (disco_apt_sources.rc | default(1)) == 0
+             if disco_repos_enabled is disco_collected or disco_apt_sources is disco_collected
              else none,
-           'locks': locks if (locks_src.rc | default(1)) == 0 else none,
-           'security_updates': security if (security_src.rc | default(1)) == 0 else none,
-           'snaps': snaps if (disco_snaps.rc | default(1)) == 0 else none,
-           'last_kernel_update': kernel if kernel | length > 0 and (disco_last_kernel_update.rc | default(1)) == 0 else none,
+           'locks': locks if locks_src is disco_collected else none,
+           'security_updates': security if security_src is disco_collected else none,
+           'snaps': snaps if disco_snaps is disco_collected else none,
+           'last_kernel_update': kernel if disco_last_kernel_update is disco_collected and kernel else none,
          } }}
   tags: [packages]

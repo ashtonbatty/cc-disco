@@ -49,6 +49,8 @@
   tags: [satellite]
 
 - name: Publish satellite facts
+  # subscription-manager status exits 1 when unregistered but still reports the
+  # status, so that field isn't gated on disco_collected.
   ansible.builtin.set_fact:
     cacheable: true
     disco_satellite: >-
@@ -57,12 +59,12 @@
       {%- set nonsat = disco_non_satellite_repos.stdout | default('') | trim -%}
       {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {{ {
-           'subscription_identity': identity if (disco_sub_identity.rc | default(1)) == 0 and identity else none,
+           'subscription_identity': identity if disco_sub_identity is disco_collected and identity else none,
            'subscription_status': status or none,
            'rhsm_server': (disco_satellite_server.stdout_lines | map('trim') | list)
-             if (disco_satellite_server.rc | default(1)) == 0 else none,
+             if disco_satellite_server is disco_collected else none,
            'katello_packages': (pkgs.keys() | select('search', '(?i)katello|satellite|gofer') | sort)
              if pkgs | length > 0 else none,
-           'non_satellite_repos': (nonsat or none) if disco_non_satellite_repos.rc is defined else none,
+           'non_satellite_repos': nonsat if disco_non_satellite_repos is disco_collected and nonsat else none,
          } }}
   tags: [satellite]
