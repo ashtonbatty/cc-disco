@@ -113,6 +113,10 @@ ansible-core dropped support for older target Pythons over time, so a mixed esta
 
 Targets also need SSH (WinRM, PSRP or SSH for Windows) and sudo (`become`) on Linux.
 
+**SSH to RHEL 6 from a modern controller.** RHEL 6 runs OpenSSH 5.3. With **ECDSA** host keys and an ECDSA login key (RHEL 6.5+), a current controller connects with its default crypto policy and no extra options; the integration tests run this way.
+- **RSA** keys fall back to `ssh-rsa` (SHA-1), which OpenSSH 8.8+ refuses. They need `-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa` and, on EL9+, the `LEGACY` crypto policy.
+- **ed25519** keys don't work against RHEL 6.
+
 ## Tests
 
 ```bash
