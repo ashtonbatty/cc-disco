@@ -123,7 +123,7 @@ Targets also need SSH (WinRM, PSRP or SSH for Windows) and sudo (`become`) on Li
 
 ```bash
 ansible-lint                        # production profile
-pytest tests/ --ignore=tests/integration   # conventions + publish-fact rendering
+pytest tests/ --ignore=tests/integration   # conventions + publish-fact rendering (needs ansible-core 2.19+)
 make -C tests/integration test-integration # containers: EL6 (core 2.11), EL7/EL9/EL10/Ubuntu (core 2.16)
 COMPOSE="podman compose" CONTAINER_CLI=podman pytest tests/integration -v
 ```

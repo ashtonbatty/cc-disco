@@ -1,118 +1,52 @@
 """Shared helpers: load task files and render their publishing set_facts.
 
-Publishing set_facts are rendered with Jinja2's NativeEnvironment plus shims for
-the Ansible filters and tests they use, so tests see the same native types
-(dicts, lists, None) that Ansible stores as facts.
+Publishing set_facts are rendered by ansible-core's own templating engine, with
+the playbook's test_plugins loaded, so tests see the real filters, tests, native
+types and None handling of the installed core (2.19+). The integration suite
+covers the older cores' non-native templating.
 """
 import base64
-import importlib.util
-import json
-import os
-import re
 from pathlib import Path
 
-import jinja2
-import jinja2.nativetypes
 import pytest
 import yaml
+from ansible.parsing.dataloader import DataLoader
+from ansible.plugins.loader import init_plugin_loader, test_loader
+from ansible.template import Templar
+
+try:
+    from ansible.template import trust_as_template
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("the unit tests render with ansible-core's templating and need ansible-core 2.19+") from exc
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASKS_DIR = REPO_ROOT / "tasks"
 
-
-def _load_test_plugin(name):
-    spec = importlib.util.spec_from_file_location(f"disco_test_plugin_{name}", REPO_ROOT / "test_plugins" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.TestModule().tests()
+init_plugin_loader()
+test_loader.add_directory(str(REPO_ROOT / "test_plugins"))
+LOADER = DataLoader()
 
 
-PLAYBOOK_TESTS = _load_test_plugin("disco")
+def _templar(context):
+    return Templar(loader=LOADER, variables=context)
 
 
-# ---------------------------------------------------------------------------
-# Ansible filter / test shims
-# ---------------------------------------------------------------------------
-
-def _flags(ignorecase=False, multiline=False):
-    flags = 0
-    if ignorecase:
-        flags |= re.I
-    if multiline:
-        flags |= re.M
-    return flags
-
-
-def _b64decode(value):
-    if not value:
-        return ""
-    return base64.b64decode(value).decode()
-
-
-def _bool(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("true", "yes", "1", "on")
-    return bool(value)
-
-
-def _regex_replace(value="", pattern="", replacement="", ignorecase=False, multiline=False):
-    return re.sub(pattern, replacement, str(value), flags=_flags(ignorecase, multiline))
-
-
-def _regex_search(value, regex, *args, **kwargs):
-    """Ansible regex_search: with backrefs ('\\1'), return those groups of the first match."""
-    match = re.search(regex, str(value), flags=_flags(kwargs.get("ignorecase"), kwargs.get("multiline")))
-    if not match:
-        return None
-    if not args:
-        return match.group(0)
-    return [match.group(int(ref.lstrip("\\"))) for ref in args]
-
-
-def _search(value, pattern="", ignorecase=False, multiline=False):
-    if value is None:
-        return False
-    return bool(re.search(pattern, str(value), flags=_flags(ignorecase, multiline)))
-
-
-def _match(value, pattern="", ignorecase=False, multiline=False):
-    if value is None:
-        return False
-    return bool(re.match(pattern, str(value), flags=_flags(ignorecase, multiline)))
-
-
-def make_env():
-    """NativeEnvironment configured like Ansible's templar (chainable undefined)."""
-    env = jinja2.nativetypes.NativeEnvironment(undefined=jinja2.ChainableUndefined)
-    env.filters.update({
-        "b64decode": _b64decode,
-        "basename": os.path.basename,
-        "bool": _bool,
-        "from_json": json.loads,
-        "regex_replace": _regex_replace,
-        "regex_search": _regex_search,
-    })
-    env.tests.update({"search": _search, "match": _match, **PLAYBOOK_TESTS})
-    return env
-
-
-ENV = make_env()
+def load_trusted(path):
+    """Load a playbook file the way Ansible does: its strings are trusted templates."""
+    return LOADER.load_from_file(str(REPO_ROOT / path), trusted_as_template=True) or []
 
 
 def render(value, context):
-    """Render a task argument the way Ansible would, recursing into dicts and lists."""
-    if isinstance(value, str):
-        if "{{" in value or "{%" in value:
-            return ENV.from_string(value).render(context)
-        return value
-    if isinstance(value, dict):
-        return {k: render(v, context) for k, v in value.items()}
-    if isinstance(value, list):
-        return [render(v, context) for v in value]
-    return value
+    """Template a value (str, dict or list) loaded from a playbook file."""
+    return _templar(context).template(value)
+
+
+def evaluate(expression, context):
+    """Evaluate a bare expression, as in a when: (literal test expressions are trusted)."""
+    if isinstance(expression, bool):
+        return expression
+    return _templar(context).evaluate_conditional(trust_as_template(expression))
 
 
 # ---------------------------------------------------------------------------
@@ -131,50 +65,32 @@ def load_task(task_file, task_name):
 
 
 def when_holds(task, context):
-    """Evaluate a task's `when:` (string or list of strings) against context."""
+    """Evaluate a task's `when:` (one condition or a list) against context."""
     conditions = task.get("when")
     if conditions is None:
         return True
     if not isinstance(conditions, list):
         conditions = [conditions]
-    for cond in conditions:
-        if isinstance(cond, bool):
-            result = cond
-        else:
-            result = ENV.from_string("{{ " + str(cond) + " }}").render(context)
-        if not _bool(result):
-            return False
-    return True
+    return all(evaluate(cond, context) for cond in conditions)
 
 
 def publish(task_file, context):
     """Run every set_fact in task_file whose `when` holds; return the published facts."""
     facts = {}
-    for task in load_tasks(task_file):
+    for task in load_trusted(task_file):
         args = task.get("ansible.builtin.set_fact")
         if args is None or not when_holds(task, context):
             continue
-        ctx = dict(context)
-        for name, value in (task.get("vars") or {}).items():
-            ctx[name] = render(value, ctx)
-        for key, value in args.items():
-            if key != "cacheable":
-                facts[key] = render(value, ctx)
+        ctx = {**context, **(task.get("vars") or {})}
+        facts.update(render({k: v for k, v in args.items() if k != "cacheable"}, ctx))
     return facts
 
 
 def controls_vars(facts, extra=None):
-    """Render vars/controls.yml for a host with the given setup facts."""
-    raw = yaml.safe_load((REPO_ROOT / "vars" / "controls.yml").read_text())
-    context = {"ansible_facts": facts, **(extra or {})}
-    resolved = {}
-    # Values reference each other; render in passes until stable.
-    for _ in range(5):
-        for name, value in raw.items():
-            if name in (extra or {}):
-                continue
-            resolved[name] = render(value, {**context, **resolved})
-    return {**resolved, **(extra or {})}
+    """vars/controls.yml rendered for a host with the given setup facts (and extra vars)."""
+    variables = {**load_trusted("vars/controls.yml"), "ansible_facts": facts, **(extra or {})}
+    templar = _templar(variables)
+    return {name: templar.template(value) for name, value in variables.items() if name != "ansible_facts"}
 
 
 # ---------------------------------------------------------------------------

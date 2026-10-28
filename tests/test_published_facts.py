@@ -7,7 +7,7 @@ lists are always lists, and no English placeholders or empty strings stand in fo
 import pytest
 
 from conftest import (
-    PLAYBOOK_TESTS, TASKS_DIR, assert_no_placeholders, cmd, controls_vars, find, loop_results, missing_cmd,
+    TASKS_DIR, assert_no_placeholders, cmd, controls_vars, evaluate, find, loop_results, missing_cmd,
     publish, skipped, slurp, slurp_missing, stat, uri,
 )
 
@@ -40,7 +40,13 @@ def _ctx(facts, extra=None, **registered):
     ({"results": [], "skipped": True}, False),
 ])
 def test_disco_collected(result, expected):
-    assert PLAYBOOK_TESTS["disco_collected"](result) is expected
+    assert evaluate("r is disco_collected", {"r": result}) is expected
+
+
+def test_disco_collected_undefined_register():
+    """A register that never ran (outside the selected --tags) is not collected."""
+    assert evaluate("r is disco_collected", {}) is False
+    assert evaluate("r is not disco_collected", {}) is True
 
 
 # ---------------------------------------------------------------------------
@@ -667,3 +673,9 @@ def test_sshd_drop_ins_null_where_not_checked(rhel8_facts):
 def test_windows_ports_fallback_publishes_null():
     assert publish("tasks/windows/ports.yml", {"ansible_facts": {}}) == {"tcp_listen": None, "udp_listen": None}
     assert publish("tasks/windows/ports.yml", {"ansible_facts": {"tcp_listen": [], "udp_listen": []}}) == {}
+
+
+def test_probe_output_is_never_templated():
+    """Registers are untrusted data: a `{{ }}` in probe output is published literally."""
+    facts = publish("tasks/linux/processes.yml", {"disco_ps": cmd("100 1 root /usr/bin/app --motd={{ 7 * 7 }}")})
+    assert facts["disco_processes"][0]["command"] == "/usr/bin/app --motd={{ 7 * 7 }}"

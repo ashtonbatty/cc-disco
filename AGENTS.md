@@ -40,7 +40,7 @@ pytest tests/ --ignore=tests/integration     # Conventions + publish-fact render
 make -C tests/integration test-integration   # Container targets, core 2.11 + 2.16
 ```
 
-`tests/test_task_conventions.py` enforces the conventions above. `tests/test_published_facts.py` renders every publish task against fixtures.
+`tests/test_task_conventions.py` enforces the conventions above. `tests/test_published_facts.py` renders every publish task against fixtures with ansible-core's own templating engine, so the unit tests need ansible-core 2.19+ installed; the integration suite covers 2.11 and 2.16.
 
 ## Project Structure
 
