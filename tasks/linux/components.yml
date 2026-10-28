@@ -1,0 +1,60 @@
+---
+# Component Versions (every Linux host)
+#
+# Versions of runtimes that are often installed outside the package manager or
+# selected via alternatives. Package versions themselves are in ansible_facts.packages.
+
+- name: Get OpenSSL version
+  ansible.builtin.command: openssl version
+  register: disco_openssl_version
+  changed_when: false
+  failed_when: false
+  tags: [components]
+
+- name: Get active Java version
+  ansible.builtin.command: java -version
+  register: disco_java_active
+  changed_when: false
+  failed_when: false
+  tags: [components]
+
+- name: Get Python interpreter versions
+  # Emits name|version for each interpreter on PATH (or platform-python); version is empty if absent.
+  ansible.builtin.shell: |
+    set -o pipefail
+    for py in python python2 python3; do
+      if command -v "$py" >/dev/null 2>&1; then
+        printf '%s|%s\n' "$py" "$("$py" --version 2>&1 | head -1)"
+      else
+        printf '%s|\n' "$py"
+      fi
+    done
+    if [ -x /usr/libexec/platform-python ]; then
+      printf 'platform-python|%s\n' "$(/usr/libexec/platform-python --version 2>&1 | head -1)"
+    else
+      printf 'platform-python|\n'
+    fi
+  args:
+    executable: /bin/bash
+  register: disco_python_versions
+  changed_when: false
+  failed_when: false
+  tags: [components]
+
+- name: Publish component version facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_components: >-
+      {%- set python = {} -%}
+      {%- for line in disco_python_versions.stdout_lines | default([]) -%}
+        {%- set f = line.split('|', 1) -%}
+        {%- if f | length == 2 -%}{%- set _ = python.update({f[0]: (f[1] | trim) or none}) -%}{%- endif -%}
+      {%- endfor -%}
+      {%- set openssl = disco_openssl_version.stdout | default('') | trim -%}
+      {%- set java = (disco_java_active.stderr | default('') ~ disco_java_active.stdout | default('')) | trim -%}
+      {{ {
+           'openssl': openssl if disco_openssl_version is disco_collected and openssl else none,
+           'java': java if disco_java_active is disco_collected and java else none,
+           'python': python if disco_python_versions is disco_collected and python else none,
+         } }}
+  tags: [components]

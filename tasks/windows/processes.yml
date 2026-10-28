@@ -1,0 +1,51 @@
+---
+# Running Processes (Windows)
+#
+# Same keys as Linux (pid, ppid, user, name, command) plus the executable path and
+# its file version. Owners need an elevated session (Get-Process -IncludeUserName);
+# without one, user is null.
+
+- name: List running processes
+  ansible.windows.win_powershell:
+    script: |
+      $Ansible.Changed = $false
+      $owners = @{}
+      try {
+          Get-Process -IncludeUserName -ErrorAction Stop | ForEach-Object { $owners[[int]$_.Id] = $_.UserName }
+      } catch { }
+      $versions = @{}
+      Get-CimInstance -ClassName Win32_Process | ForEach-Object {
+          $path = $_.ExecutablePath
+          if ($path -and -not $versions.ContainsKey($path)) {
+              $versions[$path] = $null
+              try { $versions[$path] = (Get-Item -LiteralPath $path -ErrorAction Stop).VersionInfo.FileVersion } catch { }
+          }
+          [PSCustomObject]@{
+              pid          = [int]$_.ProcessId
+              ppid         = [int]$_.ParentProcessId
+              user         = $owners[[int]$_.ProcessId]
+              name         = [string]$_.Name
+              command      = $_.CommandLine
+              path         = $path
+              file_version = if ($path) { $versions[$path] } else { $null }
+          }
+      }
+  register: disco_win_processes
+  changed_when: false
+  failed_when: false
+  tags: [processes]
+
+- name: Publish process facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_processes: "{{ disco_win_processes.output | sort(attribute='pid') }}"
+  when: disco_win_processes is disco_collected
+  tags: [processes]
+
+- name: Publish process facts as unavailable
+  # A literal null: a templated none would render as "" on ansible-core < 2.19.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_processes: null
+  when: disco_win_processes is not disco_collected
+  tags: [processes]

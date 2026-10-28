@@ -1,0 +1,47 @@
+---
+# Filesystem Exploration
+#
+# All probes run in one task (see disco_probe_sh in vars/controls.yml).
+
+- name: Probe /opt, /data and third-party software paths
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    # A bespoke directory inventory across multiple optional roots.
+    third_party_paths() {
+      for d in /usr/local/bin /usr/local/sbin /app /apps /software; do
+        if [ -d "$d" ]; then
+          listing=$(ls -1 "$d" 2>/dev/null)
+          if [ -n "$listing" ]; then
+            echo "=== ${d} ==="
+            echo "$listing"
+          fi
+        fi
+      done
+    }
+    probe_ls opt /opt '*' -d
+    probe_ls data /data '*' -d
+    [ -n "$DISCO_HEAVY" ] && probe third_party_paths third_party_paths
+    exit 0
+  args:
+    executable: /bin/bash
+  environment:
+    DISCO_HEAVY: "{{ 'yes' if collect_command_heavy_probes | bool else '' }}"
+  register: disco_filesystem_probes
+  changed_when: false
+  failed_when: false
+  when: collect_deep_filesystem | bool
+  tags: [filesystem, deep_filesystem]
+
+- name: Publish filesystem facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_filesystem: >-
+      {%- set p = disco_filesystem_probes | disco_probes -%}
+      {%- set third_party = p.third_party_paths.stdout | default('') | trim -%}
+      {{ {
+           'opt': p.opt.stdout_lines | sort if p.opt is disco_collected else none,
+           'data': p.data.stdout_lines | sort if p.data is disco_collected else none,
+           'third_party_paths': third_party if p.third_party_paths is disco_collected and third_party else none,
+         } }}
+  tags: [filesystem, deep_filesystem]

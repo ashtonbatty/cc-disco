@@ -1,0 +1,22 @@
+---
+# Discovery controls — published as a fact so consumers can see how each host was scanned.
+
+- name: Publish discovery controls
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_controls: >-
+      {{ {
+           'profile': discovery_profile | trim,
+           'mode': discovery_mode,
+           'collect_deep_security': collect_deep_security | bool,
+           'collect_deep_kernel': collect_deep_kernel | bool,
+           'collect_deep_filesystem': collect_deep_filesystem | bool,
+           'collect_command_heavy_probes': collect_command_heavy_probes | bool,
+           'omitted': (['deep_security'] if not collect_deep_security | bool else [])
+                      + (['deep_kernel'] if not collect_deep_kernel | bool else [])
+                      + (['deep_filesystem'] if not collect_deep_filesystem | bool else [])
+                      + (['command_heavy_probes'] if not collect_command_heavy_probes | bool else []),
+           'run_tags': ansible_run_tags | default([]) | list,
+           'collected_at': (ansible_facts.date_time | default({})).iso8601 | default(none),
+         } }}
+  tags: [always]

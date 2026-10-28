@@ -1,0 +1,18 @@
+ARG ALMA_VERSION=9
+FROM docker.io/library/almalinux:${ALMA_VERSION}
+
+ARG SCENARIO=el9-extended
+
+# sshd, sudo and the tools the inventory layer probes (ps, ss).
+RUN dnf install -y openssh-server sudo python3 procps-ng iproute
+
+# User, sudo, sshd and the controller's key (shared by every target).
+COPY tests/integration/target-setup.sh tests/integration/ssh-keys/id_ecdsa.pub /tmp/
+RUN bash /tmp/target-setup.sh /tmp/id_ecdsa.pub
+
+# Provision script (scenario-specific config). It leaves the dnf metadata
+# cache in place: the playbook's yum/dnf queries are cache-only.
+COPY tests/integration/scenarios/${SCENARIO}/provision.sh /tmp/provision.sh
+RUN chmod +x /tmp/provision.sh && /tmp/provision.sh
+
+CMD ["/usr/sbin/sshd", "-D"]

@@ -1,0 +1,20 @@
+---
+# Services (every Linux host)
+#
+# service_facts publishes ansible_facts.services for systemd, SysV (including
+# chkconfig enablement) and upstart. Nothing else is needed here: the init system
+# is already in ansible_service_mgr.
+
+- name: Collect service facts
+  ansible.builtin.service_facts:
+  failed_when: false
+  tags: [services, firewall]
+
+- name: Publish services as unavailable
+  # service_facts sets no fact when it finds no service manager (e.g. containers
+  # without systemd). A literal null keeps the null convention.
+  ansible.builtin.set_fact:
+    cacheable: true
+    services: null
+  when: ansible_facts.services is not defined
+  tags: [services, firewall]

@@ -1,0 +1,45 @@
+---
+# Running Processes (every Linux host)
+
+- name: List running processes
+  # -ww: never truncate the command line. user:32 keeps long user names intact;
+  # fall back to the plain column on procps builds without width specifiers (RHEL 6).
+  ansible.builtin.shell: |
+    ps -eww -o pid=,ppid=,user:32=,args= 2>/dev/null || ps -eww -o pid=,ppid=,user=,args=
+  args:
+    executable: /bin/bash
+  register: disco_ps
+  changed_when: false
+  failed_when: false
+  tags: [processes, ports]
+
+- name: Publish process facts
+  # Kernel threads (pid 2 and its children) are dropped: they carry no package or version.
+  # name drops the trailing colon that setproctitle adds ("sshd: /usr/sbin/sshd -D [listener]").
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_processes: >-
+      {%- set result = [] -%}
+      {%- for line in disco_ps.stdout_lines | default([]) -%}
+        {%- set f = line.split(None, 3) -%}
+        {%- if f | length == 4 and f[0] != '2' and f[1] != '2' -%}
+          {%- set _ = result.append({
+                'pid': f[0] | int,
+                'ppid': f[1] | int,
+                'user': f[2],
+                'name': f[3].split() | first | basename | regex_replace(':$', ''),
+                'command': f[3],
+              }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result }}
+  when: disco_ps is disco_collected
+  tags: [processes]
+
+- name: Publish process facts as unavailable
+  # A literal null: a templated none would render as "" on ansible-core < 2.19.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_processes: null
+  when: disco_ps is not disco_collected
+  tags: [processes]

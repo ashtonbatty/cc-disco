@@ -1,0 +1,60 @@
+---
+# Platform Detection
+#
+# setup already reports DMI vendor/product (ansible_system_vendor, ansible_product_name)
+# and virtualisation (ansible_virtualization_type/role). This adds boot mode and
+# cloud metadata checks, and derives a single platform label.
+
+- name: Check boot mode (UEFI vs BIOS)
+  ansible.builtin.stat:
+    path: /sys/firmware/efi
+  register: disco_efi_dir
+  failed_when: false
+  tags: [platform]
+
+# IMDS endpoints require HTTP — HTTPS is not supported by cloud metadata services.
+# Skip on hosts whose DMI vendor identifies known non-cloud hardware, avoiding a
+# 2-second timeout per check on bare-metal and VMware hosts.
+- name: Check for AWS EC2 (IMDS)
+  ansible.builtin.uri:
+    url: http://169.254.169.254/latest/meta-data/instance-id
+    timeout: 2
+  register: disco_ec2_check
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.system_vendor | default('') is not search('(?i)VMware|Dell|HP|HPE|Lenovo|Supermicro|Cisco')
+  tags: [platform]
+
+- name: Check for Azure VM (IMDS)
+  ansible.builtin.uri:
+    url: http://169.254.169.254/metadata/instance?api-version=2021-02-01
+    headers:
+      Metadata: "true"
+    timeout: 2
+  register: disco_azure_check
+  changed_when: false
+  failed_when: false
+  when: ansible_facts.system_vendor | default('') is not search('(?i)VMware|Dell|HP|HPE|Lenovo|Supermicro|Cisco')
+  tags: [platform]
+
+- name: Publish platform facts
+  # IMDSv2-only instances answer an unauthenticated GET with 401, which still identifies EC2.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_platform: >-
+      {%- set aws = (disco_ec2_check.status | int) in [200, 401] if disco_ec2_check is disco_collected else none -%}
+      {%- set azure = (disco_azure_check.status | int) == 200 if disco_azure_check is disco_collected else none -%}
+      {%- set vendor = ansible_facts.system_vendor | default('') -%}
+      {%- if aws -%}{%- set detected = 'aws_ec2' -%}
+      {%- elif azure -%}{%- set detected = 'azure_vm' -%}
+      {%- elif 'VMware' in vendor -%}{%- set detected = 'vmware' -%}
+      {%- elif ansible_facts.virtualization_role | default('') == 'guest' -%}{%- set detected = ansible_facts.virtualization_type | default(none) -%}
+      {%- else -%}{%- set detected = 'bare_metal' -%}
+      {%- endif -%}
+      {{ {
+           'boot_mode': ('UEFI' if disco_efi_dir.stat.exists else 'BIOS') if disco_efi_dir is disco_collected else none,
+           'aws_imds': aws,
+           'azure_imds': azure,
+           'detected': detected,
+         } }}
+  tags: [platform]

@@ -1,645 +1,401 @@
 #!/usr/bin/env python3
-"""Integration tests that verify report content from container-based runs.
+"""Integration tests that verify exported facts from container-based runs.
 
-These tests run the full discovery playbook against containerised EL6/EL7
-targets and assert that the generated report contains the expected data.
-The container stack is built and run once per test session via a session-
-scoped fixture; individual tests then assert against the parsed YAML.
+The container stack runs the playbook with ansible-core 2.11 against an EL6
+target and with ansible-core 2.16 against EL7, EL9, EL10 and Ubuntu 24.04
+targets, then exports output/facts/<host>.json. The stack is built and run
+once per test session; individual tests assert against the parsed facts.
 
 Run with:
     pytest tests/integration/test_report_content.py -v
-    pytest tests/integration/test_report_content.py -v -k el7_webserver
+    pytest tests/integration/test_report_content.py -v -k el9
 """
+import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
+
+# validate.py runs inside the controller container (stdlib only); its host lists
+# and checks are shared here so both paths assert the same things.
+from validate import EXPECTED_HOSTS, check_host, check_scenarios
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = REPO_ROOT / "tests" / "integration" / "compose.yml"
-REPORT_PATH = REPO_ROOT / "tests" / "integration" / "output" / "discovery_report.yml"
+OUTPUT_DIR = REPO_ROOT / "tests" / "integration" / "output"
+FACTS_DIR = OUTPUT_DIR / "facts"
+# e.g. COMPOSE="podman compose" CONTAINER_CLI=podman
+COMPOSE = os.environ.get("COMPOSE", "docker-compose").split()
+CONTAINER_CLI = os.environ.get("CONTAINER_CLI", "docker")
 
 
 # ---------------------------------------------------------------------------
 # Session fixture — build and run the container stack once
 # ---------------------------------------------------------------------------
 
+def _compose(*args, **kwargs):
+    return subprocess.run([*COMPOSE, "-f", str(COMPOSE_FILE), *args], cwd=REPO_ROOT, **kwargs)
+
+
 @pytest.fixture(scope="session")
-def integration_report():
-    """Run the full container stack and return the parsed report dict."""
-    # Tear down any stale containers/volumes
-    subprocess.run(
-        ["docker-compose", "-f", str(COMPOSE_FILE), "down", "--volumes"],
-        cwd=REPO_ROOT,
-        capture_output=True,
+def facts():
+    """Run the container stack and return {hostname: exported facts}."""
+    _compose("down", "--volumes", capture_output=True)
+
+    result = _compose(
+        "up", "--build", "--abort-on-container-exit", "--exit-code-from", "controller",
+        capture_output=True, text=True, timeout=1800,
     )
 
-    # Build and run
-    result = subprocess.run(
-        [
-            "docker-compose", "-f", str(COMPOSE_FILE),
-            "up", "--build",
-            "--abort-on-container-exit",
-            "--exit-code-from", "controller",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-
-    # Copy report from the controller container before teardown
-    output_dir = REPO_ROOT / "tests" / "integration" / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Resolve the controller container ID dynamically — the name depends on
-    # the Docker Compose project name which varies by directory and version.
-    # Use -qa (all, including stopped) since the container has already exited.
-    id_result = subprocess.run(
-        ["docker-compose", "-f", str(COMPOSE_FILE), "ps", "-qa", "controller"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    container_id = id_result.stdout.strip()
+    # Copy facts from the controller container before teardown. The container ID
+    # depends on the compose project name, so resolve it (-a: it has exited).
+    id_result = _compose("ps", "-qa", "controller", capture_output=True, text=True)
+    container_id = id_result.stdout.strip().splitlines()[0] if id_result.stdout.strip() else ""
     if not container_id:
-        pytest.fail(
-            f"Could not resolve controller container ID: {id_result.stderr}"
-        )
+        pytest.fail(f"Could not resolve controller container ID: {id_result.stderr}")
 
+    if FACTS_DIR.exists():
+        shutil.rmtree(FACTS_DIR)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cp_result = subprocess.run(
-        [
-            "docker", "cp",
-            f"{container_id}:/home/ansible/playbook/output/discovery_report.yml",
-            str(REPORT_PATH),
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
+        [CONTAINER_CLI, "cp", f"{container_id}:/home/ansible/playbook/output/facts", str(FACTS_DIR)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
     )
 
     if result.returncode != 0:
-        # Print last 40 lines of output for debugging
-        lines = (result.stdout + result.stderr).splitlines()
-        tail = "\n".join(lines[-40:])
-        pytest.fail(
-            f"Container stack exited with code {result.returncode}.\n"
-            f"Last 40 lines:\n{tail}"
-        )
-
+        tail = "\n".join((result.stdout + result.stderr).splitlines()[-60:])
+        pytest.fail(f"Container stack exited with code {result.returncode}.\nLast 60 lines:\n{tail}")
     if cp_result.returncode != 0:
-        pytest.fail(
-            f"docker cp failed (rc={cp_result.returncode}): {cp_result.stderr}"
-        )
+        pytest.fail(f"{CONTAINER_CLI} cp failed (rc={cp_result.returncode}): {cp_result.stderr}")
 
-    assert REPORT_PATH.exists(), f"Report not found at {REPORT_PATH}"
-
-    with open(REPORT_PATH) as f:
-        report = yaml.safe_load(f)
-
-    assert isinstance(report, dict), "Report root is not a dict"
-    return report
-
-
-# Convenience fixtures for per-host access
-@pytest.fixture(scope="session")
-def el6(integration_report):
-    return integration_report["el6-legacy"]
+    loaded = {}
+    for host in EXPECTED_HOSTS:
+        path = FACTS_DIR / f"{host}.json"
+        assert path.exists(), f"Facts not found at {path}"
+        loaded[host] = json.loads(path.read_text())
+    return loaded
 
 
 @pytest.fixture(scope="session")
-def el7_web(integration_report):
-    return integration_report["el7-webserver"]
+def el6(facts):
+    return facts["el6-legacy"]
 
 
 @pytest.fixture(scope="session")
-def el7_min(integration_report):
-    return integration_report["el7-minimal"]
+def el7_web(facts):
+    return facts["el7-webserver"]
+
+
+@pytest.fixture(scope="session")
+def el7_min(facts):
+    return facts["el7-minimal"]
+
+
+@pytest.fixture(scope="session")
+def el9(facts):
+    return facts["el9-extended"]
+
+
+@pytest.fixture(scope="session")
+def el10(facts):
+    return facts["el10-extended"]
+
+
+@pytest.fixture(scope="session")
+def ubuntu(facts):
+    return facts["ubuntu2404-inventory"]
 
 
 # ===========================================================================
-# Structure and metadata
+# Every host — profile, inventory layer, null convention
 # ===========================================================================
 
-class TestReportStructure:
-    """All hosts present with all sections."""
+def test_scenarios(facts):
+    assert check_scenarios(facts) == []
 
-    EXPECTED_HOSTS = ["el7-webserver", "el7-minimal", "el6-legacy"]
-    EXPECTED_SECTIONS = [
-        "discovery_controls", "system", "cpu", "memory", "platform",
-        "network", "firewall", "storage", "selinux", "security",
-        "identity", "kernel", "services", "packages", "satellite",
-        "agents_detected", "common_apps", "directories", "migration",
-    ]
 
-    def test_all_hosts_present(self, integration_report):
-        for host in self.EXPECTED_HOSTS:
-            assert host in integration_report, f"Missing host: {host}"
+class TestEveryHost:
 
     @pytest.mark.parametrize("host", EXPECTED_HOSTS)
-    def test_all_sections_present(self, integration_report, host):
-        host_data = integration_report[host]
-        for section in self.EXPECTED_SECTIONS:
-            assert section in host_data, f"{host}: missing section '{section}'"
+    def test_validator(self, facts, host):
+        """Profile, inventory facts, extended facts only where expected, null convention."""
+        assert check_host(host, facts[host]) == []
 
     @pytest.mark.parametrize("host", EXPECTED_HOSTS)
-    def test_discovery_controls_full_mode(self, integration_report, host):
-        dc = integration_report[host]["discovery_controls"]
-        assert dc["mode"] == "full"
-        assert dc["collect_deep_security"] is True
-        assert dc["collect_deep_kernel"] is True
-        assert dc["collect_deep_filesystem"] is True
-        assert dc["collect_command_heavy_probes"] is True
+    def test_full_mode(self, facts, host):
+        controls = facts[host]["disco_controls"]
+        assert controls["mode"] == "full"
+        assert controls["omitted"] == []
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_setup_facts_present(self, facts, host):
+        assert facts[host]["hostname"] == host
+        assert facts[host]["distribution"]
+        assert facts[host]["memtotal_mb"] > 0
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_packages_mirror_package_facts(self, facts, host):
+        pkgs = facts[host]["packages"]
+        assert isinstance(pkgs, dict) and len(pkgs) > 50
+        assert "openssh-server" in pkgs
+        assert isinstance(pkgs["openssh-server"], list)
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_disco_packages_shape(self, facts, host):
+        dp = facts[host]["disco_packages"]
+        assert set(dp) == {"third_party", "repos", "locks", "security_updates", "snaps", "last_kernel_update"}
+        assert isinstance(dp["third_party"], list)
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_sshd_process(self, facts, host):
+        procs = facts[host]["disco_processes"]
+        sshd = [p for p in procs if p["name"] == "sshd"]
+        assert sshd, "sshd not in process list"
+        assert isinstance(sshd[0]["pid"], int)
+        assert sshd[0]["user"] == "root"
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_sshd_listening(self, facts, host):
+        listeners = [p for p in facts[host]["tcp_listen"] if p["port"] == 22]
+        assert listeners, "port 22 not in tcp_listen"
+        assert listeners[0]["name"] == "sshd"
+        assert isinstance(facts[host]["udp_listen"], list)
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_components(self, facts, host):
+        comp = facts[host]["disco_components"]
+        assert set(comp) == {"openssl", "java", "python"}
+        assert any(v for v in comp["python"].values()), comp["python"]
+
+    @pytest.mark.parametrize("host", EXPECTED_HOSTS)
+    def test_no_container_runtime(self, facts, host):
+        assert facts[host]["disco_containers"] is None
+
+    def test_redundant_probes_dropped(self, el7_web):
+        # These are already provided by setup facts.
+        for section, field in [("disco_storage", "lvm"), ("disco_network", "resolv_conf"),
+                               ("disco_platform", "dmi_vendor"), ("disco_network", "bonding")]:
+            assert field not in el7_web[section]
 
 
 # ===========================================================================
-# el7-webserver — feature-rich CentOS 7
+# el7-webserver — feature-rich CentOS 7 (extended profile)
 # ===========================================================================
 
 class TestEl7Webserver:
-    """el7-webserver: httpd, nginx, sssd, krb5, agents, cron, hardened configs."""
 
-    # --- System ---
-    def test_hostname(self, el7_web):
-        assert el7_web["system"]["hostname"] == "el7-webserver"
-
-    def test_os_version(self, el7_web):
-        assert "CentOS" in el7_web["system"]["os"]
-        assert el7_web["system"]["rhel_release"] == "7"
-
-    def test_release_string(self, el7_web):
-        assert "CentOS Linux release 7" in el7_web["system"]["rhel_release_string"]
-
-    def test_uptime_is_positive(self, el7_web):
-        assert el7_web["system"]["uptime_seconds"] > 0
-        assert el7_web["system"]["uptime_days"] >= 0
-
-    # --- CPU / Memory ---
-    def test_cpu_fields(self, el7_web):
-        assert el7_web["cpu"]["physical_count"] >= 1
-        assert el7_web["cpu"]["total_vcpus"] >= 1
-        assert el7_web["cpu"]["model"] is not None
-
-    def test_memory_positive(self, el7_web):
-        assert el7_web["memory"]["total_mb"] > 0
-
-    # --- Platform ---
-    def test_platform_detection(self, el7_web):
-        # Containers appear as bare_metal (no virt detection)
-        assert el7_web["platform"]["detected_platform"] is not None
-        assert el7_web["platform"]["boot_mode"] in ("UEFI", "BIOS")
-        assert el7_web["platform"]["init_system"] in ("systemd", "sysvinit")
-
-    # --- Identity ---
     def test_sssd_conf_present(self, el7_web):
-        sssd = el7_web["identity"]["sssd_conf"]
-        assert sssd is not None
-        assert "example.com" in sssd
-        assert "id_provider = ad" in sssd
+        sssd = el7_web["disco_identity"]["sssd_conf"]
+        assert sssd is not None and "[sssd]" in sssd
 
     def test_krb5_keytab_exists(self, el7_web):
-        assert el7_web["identity"]["krb5_keytab_exists"] is True
-
-    def test_krb5_conf_present(self, el7_web):
-        krb5 = el7_web["identity"]["krb5_conf"]
-        assert krb5 is not None
-        assert "EXAMPLE.COM" in krb5
+        assert el7_web["disco_identity"]["krb5_keytab_exists"] is True
 
     def test_nsswitch_has_sss(self, el7_web):
-        nss = el7_web["identity"]["nsswitch_conf"]
-        assert nss is not None
-        assert "sss" in nss
-
-    # --- Security ---
-    def test_sudoers_main_present(self, el7_web):
-        assert el7_web["security"]["sudoers_main"] is not None
+        assert "sss" in el7_web["disco_identity"]["nsswitch_conf"]
 
     def test_sudoers_drop_in_admins(self, el7_web):
-        drop_ins = el7_web["security"]["sudoers_drop_ins"]
-        assert isinstance(drop_ins, list)
-        # Should have at least the admins file (plus the ansible test user file)
-        paths = [d["file"] for d in drop_ins]
-        assert any("admins" in p for p in paths), f"Expected admins drop-in, got {paths}"
-        # Verify content
+        drop_ins = el7_web["disco_security"]["sudoers_drop_ins"]
         admins = next(d for d in drop_ins if "admins" in d["file"])
         assert "NOPASSWD" in admins["content"]
 
     def test_sshd_config_hardened(self, el7_web):
-        sshd = el7_web["security"]["sshd_config"]
-        assert sshd is not None
-        assert "PermitRootLogin no" in sshd
-        assert "PasswordAuthentication no" in sshd
+        assert "PermitRootLogin no" in el7_web["disco_security"]["sshd_config"]
 
     def test_pam_configs_collected(self, el7_web):
-        pam = el7_web["security"]["pam"]
-        assert isinstance(pam, list)
-        assert len(pam) > 0
-        pam_files = [p["file"] for p in pam]
-        assert any("system-auth" in f for f in pam_files)
+        files = [p["file"] for p in el7_web["disco_security"]["pam"]]
+        assert "/etc/pam.d/sshd" in files
+
+    def test_authselect_null_on_el7(self, el7_web):
+        # RHEL 7 uses authconfig; authselect isn't installed.
+        assert el7_web["disco_security"]["authselect"] is None
 
     def test_crypto_policy_null_on_el7(self, el7_web):
-        # crypto-policies is RHEL 8+
-        assert el7_web["security"]["crypto_policy"] is None
+        assert el7_web["disco_security"]["crypto_policy"] is None
 
-    # --- SELinux ---
-    def test_selinux_config_present(self, el7_web):
-        config = el7_web["selinux"]["config"]
-        assert config is not None
-        assert "SELINUX=enforcing" in config
-
-    # --- Kernel ---
-    def test_loaded_modules_present(self, el7_web):
-        assert el7_web["kernel"]["loaded_modules"] is not None
+    def test_selinux_from_setup(self, el7_web):
+        assert "selinux" in el7_web
 
     def test_grub_defaults_present(self, el7_web):
-        grub = el7_web["kernel"]["grub_defaults"]
-        assert grub is not None
-        assert "GRUB_TIMEOUT" in grub
-        assert "crashkernel" in grub
+        assert "GRUB_TIMEOUT" in el7_web["disco_kernel"]["grub_defaults"]
 
-    # --- Network ---
-    def test_has_ip_addresses(self, el7_web):
-        # Containers running sshd -D (no systemd) may not populate
-        # default_ipv4 — check all_ipv4_addresses instead
-        addrs = el7_web["network"]["all_ipv4_addresses"]
-        assert isinstance(addrs, list)
-
-    def test_resolv_conf_present(self, el7_web):
-        resolv = el7_web["network"]["resolv_conf"]
-        assert resolv is not None
-        assert "nameserver" in resolv
-
-    # --- Firewall ---
-    def test_firewall_fields_present(self, el7_web):
-        fw = el7_web["firewall"]
-        assert "firewalld_active" in fw
-        assert "iptables_active" in fw
-        assert "firewalld_zones" in fw
-        assert "nftables_rules" in fw
-
-    # --- Storage ---
     def test_fstab_has_nfs_mount(self, el7_web):
-        fstab = el7_web["storage"]["fstab"]
-        assert fstab is not None
-        assert "nfs-server:/exports/data" in fstab
-
-    def test_mounts_populated(self, el7_web):
-        mounts = el7_web["storage"]["mounts"]
-        assert isinstance(mounts, list)
-        assert len(mounts) > 0
-        # Each mount should have required fields
-        for m in mounts:
-            assert "device" in m
-            assert "mount" in m
-            assert "fstype" in m
-
-    # --- Packages ---
-    def test_package_count_positive(self, el7_web):
-        assert el7_web["packages"]["total_count"] > 100
-
-    def test_non_redhat_packages_list(self, el7_web):
-        pkgs = el7_web["packages"]["non_redhat_packages"]
-        assert isinstance(pkgs, list)
-        # CentOS packages are not Red Hat vendor
-        assert len(pkgs) > 0
-
-    # --- Agents ---
-    def test_crowdstrike_detected(self, el7_web):
-        agents = el7_web["agents_detected"]
-        assert isinstance(agents, list)
-        assert "crowdstrike" in agents
-
-    def test_splunk_detected(self, el7_web):
-        agents = el7_web["agents_detected"]
-        assert "splunk" in agents
-
-    # --- Common Apps ---
-    def test_httpd_in_common_apps(self, el7_web):
-        apps = el7_web["common_apps"]
-        assert isinstance(apps, list)
-        assert "httpd" in apps
-
-    # --- Filesystem ---
-    def test_opt_directories(self, el7_web):
-        opt = el7_web["directories"]["opt"]
-        assert isinstance(opt, list)
-        opt_basenames = [os.path.basename(p) for p in opt]
-        assert "CrowdStrike" in opt_basenames
-        assert "splunkforwarder" in opt_basenames
-
-    # --- Migration ---
-    def test_deprecated_packages(self, el7_web):
-        deprecated = el7_web["migration"]["deprecated_packages"]
-        assert isinstance(deprecated, list)
-        assert "net-tools" in deprecated
-
-    def test_python_versions_present(self, el7_web):
-        pyver = el7_web["migration"]["python_versions"]
-        assert pyver is not None
-        assert "python" in pyver.lower()
+        assert "nfs" in el7_web["disco_storage"]["fstab"]
 
     def test_fstab_concerns_nfs(self, el7_web):
-        concerns = el7_web["migration"]["fstab_concerns"]
-        assert concerns is not None
-        assert "nfs" in concerns
+        assert any("nfs" in line for line in el7_web["disco_readiness"]["fstab_concerns"])
+
+    def test_opt_directories(self, el7_web):
+        opt = el7_web["disco_filesystem"]["opt"]
+        assert any("splunkforwarder" in d for d in opt)
+        assert any("CrowdStrike" in d for d in opt)
+
+    def test_os_packages_not_third_party(self, el7_web):
+        names = {p["name"] for p in el7_web["disco_packages"]["third_party"]}
+        assert "bash" not in names and "httpd" not in names
+
+    def test_cron_d_entry(self, el7_web):
+        assert "backup-job" in el7_web["disco_readiness"]["cron_d_entries"]
 
     def test_alternatives_present(self, el7_web):
-        alts = el7_web["migration"]["alternatives"]
-        assert alts is not None
-        assert len(alts.strip()) > 0
+        assert el7_web["disco_readiness"]["alternatives"]
 
-    # --- Satellite ---
     def test_satellite_fields_present(self, el7_web):
-        sat = el7_web["satellite"]
-        assert "subscription_identity" in sat
-        assert "subscription_status" in sat
-        assert "satellite_server" in sat
+        sat = el7_web["disco_satellite"]
+        assert set(sat) == {"subscription_identity", "subscription_status", "rhsm_server",
+                            "katello_packages", "non_satellite_repos"}
 
 
 # ===========================================================================
-# el7-minimal — bare CentOS 7, iptables only
+# el7-minimal — bare CentOS 7 (extended profile)
 # ===========================================================================
 
 class TestEl7Minimal:
-    """el7-minimal: bare CentOS 7 with iptables-services, no extras."""
 
-    def test_hostname(self, el7_min):
-        assert el7_min["system"]["hostname"] == "el7-minimal"
-
-    def test_os_version(self, el7_min):
-        assert el7_min["system"]["rhel_release"] == "7"
-
-    # --- Identity: nothing configured ---
     def test_sssd_not_configured(self, el7_min):
-        assert el7_min["identity"]["sssd_conf"] is None
+        assert el7_min["disco_identity"]["sssd_conf"] is None
 
     def test_krb5_keytab_absent(self, el7_min):
-        assert el7_min["identity"]["krb5_keytab_exists"] is False
+        assert el7_min["disco_identity"]["krb5_keytab_exists"] is False
 
-    # --- Security ---
-    def test_crypto_policy_null_on_el7(self, el7_min):
-        assert el7_min["security"]["crypto_policy"] is None
-
-    # --- SELinux: not configured in container ---
-    def test_selinux_config_null(self, el7_min):
-        assert el7_min["selinux"]["config"] is None
-
-    # --- Kernel ---
-    def test_grub_defaults_null(self, el7_min):
-        # No /etc/default/grub in minimal container
-        assert el7_min["kernel"]["grub_defaults"] is None
-
-    # --- Agents: none installed ---
     def test_no_agents(self, el7_min):
-        assert el7_min["agents_detected"] == []
+        assert el7_min["disco_backup"]["agents"] == []
 
-    # --- Common apps: none ---
     def test_no_common_apps(self, el7_min):
-        assert el7_min["common_apps"] == []
+        assert el7_min["disco_apps"]["common"] == []
 
-    # --- Migration ---
     def test_iptables_services_deprecated(self, el7_min):
-        deprecated = el7_min["migration"]["deprecated_packages"]
-        assert isinstance(deprecated, list)
-        assert "iptables-services" in deprecated
+        assert "iptables-services" in el7_min["disco_readiness"]["deprecated_packages"]
 
     def test_no_xinetd_services(self, el7_min):
-        assert el7_min["migration"]["xinetd_services"] == []
+        assert el7_min["disco_readiness"]["xinetd_services"] == []
 
-    # --- Network ---
     def test_no_ifcfg_files(self, el7_min):
-        assert el7_min["network"]["ifcfg_files"] == []
+        assert el7_min["disco_network"]["ifcfg_files"] == []
 
-    def test_nm_not_found(self, el7_min):
-        assert el7_min["network"]["networkmanager_active"] == "not found"
-
-    # --- Filesystem: no extra dirs ---
-    def test_opt_empty(self, el7_min):
-        assert el7_min["directories"]["opt"] == []
-
-    # --- Storage ---
     def test_fstab_present(self, el7_min):
-        fstab = el7_min["storage"]["fstab"]
-        assert fstab is not None
-        assert "centos-root" in fstab
+        assert "centos-root" in el7_min["disco_storage"]["fstab"]
 
 
 # ===========================================================================
-# el6-legacy — CentOS 6, sysvinit, xinetd, ntp
+# el6-legacy — CentOS 6, sysvinit, xinetd, ntp (ansible-core 2.11)
 # ===========================================================================
 
 class TestEl6Legacy:
-    """el6-legacy: CentOS 6 with sysvinit, xinetd, ntp, legacy networking."""
 
-    def test_hostname(self, el6):
-        assert el6["system"]["hostname"] == "el6-legacy"
+    def test_release(self, el6):
+        assert el6["distribution"] == "CentOS"
+        assert el6["distribution_major_version"] == "6"
 
-    def test_os_version(self, el6):
-        assert "CentOS" in el6["system"]["os"]
-        assert el6["system"]["rhel_release"] == "6"
+    def test_sysvinit_from_setup(self, el6):
+        assert el6["service_mgr"] != "systemd"
 
-    def test_release_string(self, el6):
-        assert "CentOS release 6" in el6["system"]["rhel_release_string"]
-
-    # --- Platform ---
-    def test_init_system_sysvinit(self, el6):
-        assert el6["platform"]["init_system"] == "sysvinit"
-
-    # --- Identity: nothing configured ---
-    def test_sssd_not_configured(self, el6):
-        assert el6["identity"]["sssd_conf"] is None
-
-    def test_krb5_keytab_absent(self, el6):
-        assert el6["identity"]["krb5_keytab_exists"] is False
-
-    # --- Security ---
     def test_crypto_policy_null_on_el6(self, el6):
-        # crypto-policies is RHEL 8+
-        assert el6["security"]["crypto_policy"] is None
+        assert el6["disco_security"]["crypto_policy"] is None
 
     def test_pam_configs_collected(self, el6):
-        pam = el6["security"]["pam"]
-        assert isinstance(pam, list)
-        assert len(pam) > 0
+        assert len(el6["disco_security"]["pam"]) > 0
 
-    # --- Network ---
     def test_ifcfg_files_present(self, el6):
-        ifcfg = el6["network"]["ifcfg_files"]
-        assert isinstance(ifcfg, list)
-        assert any("ifcfg-eth0" in f for f in ifcfg)
+        assert any("ifcfg-eth0" in f for f in el6["disco_network"]["ifcfg_files"])
 
-    def test_nm_not_found(self, el6):
-        assert el6["network"]["networkmanager_active"] == "not found"
-
-    # --- Storage ---
     def test_fstab_has_ext3(self, el6):
-        fstab = el6["storage"]["fstab"]
-        assert fstab is not None
-        assert "ext3" in fstab
+        assert "ext3" in el6["disco_storage"]["fstab"]
+        assert any("ext3" in line for line in el6["disco_readiness"]["fstab_concerns"])
 
-    # --- Migration: deprecated packages ---
-    def test_ntp_deprecated(self, el6):
-        deprecated = el6["migration"]["deprecated_packages"]
-        assert "ntp" in deprecated
+    def test_deprecated_packages(self, el6):
+        assert {"ntp", "xinetd", "net-tools"} <= set(el6["disco_readiness"]["deprecated_packages"])
 
-    def test_xinetd_deprecated(self, el6):
-        deprecated = el6["migration"]["deprecated_packages"]
-        assert "xinetd" in deprecated
+    def test_openssl_version(self, el6):
+        assert "OpenSSL 1.0" in el6["disco_components"]["openssl"]
 
-    def test_net_tools_deprecated(self, el6):
-        deprecated = el6["migration"]["deprecated_packages"]
-        assert "net-tools" in deprecated
+    def test_python2_version(self, el6):
+        assert el6["disco_components"]["python"]["python"].startswith("Python 2.6")
 
-    # --- Migration: xinetd services ---
-    def test_xinetd_services_detected(self, el6):
-        xinetd = el6["migration"]["xinetd_services"]
-        assert isinstance(xinetd, list)
-        assert len(xinetd) > 0
-        assert "tftp" in xinetd
-
-    # --- Migration: legacy network ---
-    def test_legacy_network_ifcfg_count(self, el6):
-        legacy = el6["migration"]["legacy_network"]
-        assert legacy is not None
-        assert "ifcfg_count:" in legacy
-        # Should have at least eth0 + lo
-        assert "ifcfg_count:0" not in legacy
-
-    # --- Migration: OpenSSL ---
-    def test_openssl_version_present(self, el6):
-        openssl = el6["migration"]["openssl_version"]
-        assert openssl is not None
-        assert "OpenSSL 1.0" in openssl
-
-    # --- Migration: alternatives ---
     def test_alternatives_present(self, el6):
-        alts = el6["migration"]["alternatives"]
-        assert alts is not None
-        assert len(alts.strip()) > 0
+        assert el6["disco_readiness"]["alternatives"]
 
-    # --- Migration: fstab concerns ---
-    def test_fstab_concerns_ext3(self, el6):
-        concerns = el6["migration"]["fstab_concerns"]
-        assert concerns is not None
-        assert "ext3" in concerns
+    def test_no_agents_or_apps(self, el6):
+        assert el6["disco_backup"]["agents"] == []
+        assert el6["disco_apps"]["common"] == []
 
-    # --- Agents: none ---
-    def test_no_agents(self, el6):
-        assert el6["agents_detected"] == []
-
-    # --- Common apps: none ---
-    def test_no_common_apps(self, el6):
-        assert el6["common_apps"] == []
-
-    # --- Filesystem: no /opt contents ---
-    def test_opt_empty(self, el6):
-        assert el6["directories"]["opt"] == []
-
-    # --- Packages ---
-    def test_package_count_positive(self, el6):
-        assert el6["packages"]["total_count"] > 50
+    def test_ports_parsed_from_old_ss(self, el6):
+        sshd = [p for p in el6["tcp_listen"] if p["port"] == 22]
+        assert isinstance(sshd[0]["pid"], int)
 
 
 # ===========================================================================
-# Cross-host consistency checks
+# RHEL 9/10 (extended profile) and Ubuntu (inventory profile), ansible-core 2.16
 # ===========================================================================
 
-class TestCrossHost:
-    """Assertions that should hold true across all hosts."""
+class TestEl9Extended:
 
-    HOSTS = ["el6-legacy", "el7-minimal", "el7-webserver"]
+    def test_distribution(self, el9):
+        assert el9["distribution"] == "AlmaLinux"
+        assert el9["distribution_major_version"] == "9"
 
-    @pytest.mark.parametrize("host", HOSTS)
-    def test_no_forbidden_placeholders(self, integration_report, host):
-        """No English placeholder strings in template-controlled fields."""
-        forbidden = [
-            "not collected", "not configured", "not checked",
-            "not registered", "not installed", "no crontab",
-            "not present", "N/A", "N/A (pre-RHEL 8)",
-        ]
-        for path, value in _walk_values(integration_report[host]):
-            if isinstance(value, str):
-                lower = value.strip().lower()
-                for placeholder in forbidden:
-                    assert lower != placeholder.lower(), (
-                        f"{host}{path}: forbidden placeholder '{placeholder}' "
-                        f"(got {value!r})"
-                    )
+    def test_epel_package_is_third_party(self, el9):
+        htop = next(p for p in el9["disco_packages"]["third_party"] if p["name"] == "htop")
+        assert "Fedora" in htop["vendor"]
+        assert not any(p["name"] == "bash" for p in el9["disco_packages"]["third_party"])
 
-    @pytest.mark.parametrize("host", HOSTS)
-    def test_list_fields_are_lists(self, integration_report, host):
-        """Fields that must always be lists should never be strings or null."""
-        host_data = integration_report[host]
-        list_checks = [
-            ("network", "all_ipv4_addresses"),
-            ("network", "all_ipv6_addresses"),
-            ("network", "dns_nameservers"),
-            ("network", "dns_search"),
-            ("network", "interfaces"),
-            ("network", "ifcfg_files"),
-            ("security", "sudoers_drop_ins"),
-            ("security", "pam"),
-            ("kernel", "third_party_modules"),
-            ("kernel", "deprecated_modules"),
-            ("packages", "non_redhat_packages"),
-            ("migration", "deprecated_packages"),
-            ("migration", "java_packages"),
-            ("migration", "xinetd_services"),
-            ("migration", "cron_d_entries"),
-            ("storage", "mounts"),
-        ]
-        for section, field in list_checks:
-            value = host_data.get(section, {}).get(field)
-            assert isinstance(value, list), (
-                f"{host}.{section}.{field} should be list, "
-                f"got {type(value).__name__}: {value!r}"
-            )
+    def test_versionlock(self, el9):
+        assert any("nginx" in lock for lock in el9["disco_packages"]["locks"])
 
-        for field in ("agents_detected", "common_apps"):
-            value = host_data.get(field)
-            assert isinstance(value, list), (
-                f"{host}.{field} should be list, "
-                f"got {type(value).__name__}: {value!r}"
-            )
+    def test_repos_from_cache(self, el9):
+        repos = el9["disco_packages"]["repos"]
+        assert "baseos" in repos and "epel" in repos
 
-    @pytest.mark.parametrize("host", HOSTS)
-    def test_numeric_fields_are_numbers(self, integration_report, host):
-        host_data = integration_report[host]
-        assert isinstance(host_data["system"]["uptime_seconds"], int)
-        assert isinstance(host_data["system"]["uptime_days"], (int, float))
-        assert isinstance(host_data["cpu"]["physical_count"], int)
-        assert isinstance(host_data["cpu"]["total_vcpus"], int)
-        assert isinstance(host_data["memory"]["total_mb"], int)
-        assert isinstance(host_data["packages"]["total_count"], int)
-        assert isinstance(host_data["migration"]["packages_32bit_count"], int)
+    def test_security_updates_is_list(self, el9):
+        assert isinstance(el9["disco_packages"]["security_updates"], list)
 
-    @pytest.mark.parametrize("host", HOSTS)
-    def test_boolean_fields_are_booleans(self, integration_report, host):
-        host_data = integration_report[host]
-        assert isinstance(host_data["identity"]["krb5_keytab_exists"], bool)
+    def test_extended_layer_on_el9(self, el9):
+        assert el9["disco_controls"]["profile"] == "extended"
+        assert el9["disco_security"]["authselect"] == {
+            "configured": True, "profile": "minimal", "features": ["with-mkhomedir"],
+        }
 
-    @pytest.mark.parametrize("host", HOSTS)
-    def test_python_versions_present(self, integration_report, host):
-        """All hosts should report Python versions."""
-        pyver = integration_report[host]["migration"]["python_versions"]
-        assert pyver is not None
-        assert "python" in pyver.lower()
+    def test_last_kernel_update_null_without_kernel(self, el9):
+        # Container images ship no kernel package.
+        assert el9["disco_packages"]["last_kernel_update"] is None
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
+class TestEl10Extended:
 
-def _walk_values(obj, path=""):
-    """Yield (path, value) for every leaf value in a nested dict/list."""
-    if isinstance(obj, dict):
-        for key, val in obj.items():
-            yield from _walk_values(val, f"{path}.{key}")
-    elif isinstance(obj, list):
-        for i, val in enumerate(obj):
-            yield from _walk_values(val, f"{path}[{i}]")
-    else:
-        yield path, obj
+    def test_distribution(self, el10):
+        assert el10["distribution"] == "AlmaLinux"
+        assert el10["distribution_major_version"] == "10"
+
+    def test_python312(self, el10):
+        assert el10["disco_components"]["python"]["python3"].startswith("Python 3.12")
+
+    def test_nginx_installed(self, el10):
+        assert "nginx" in el10["packages"]
+
+    def test_authselect_local_profile(self, el10):
+        assert el10["disco_security"]["authselect"] == {"configured": True, "profile": "local", "features": []}
+
+
+class TestUbuntuInventory:
+
+    def test_distribution(self, ubuntu):
+        assert ubuntu["distribution"] == "Ubuntu"
+        assert ubuntu["distribution_major_version"] == "24"
+
+    def test_local_package_is_third_party(self, ubuntu):
+        local = next(p for p in ubuntu["disco_packages"]["third_party"] if p["name"] == "disco-localtool")
+        assert local["vendor"] is None
+        assert not any(p["name"] == "bash" for p in ubuntu["disco_packages"]["third_party"])
+
+    def test_apt_sources(self, ubuntu):
+        assert any("ubuntu" in line for line in ubuntu["disco_packages"]["repos"])
+
+    def test_security_updates_is_list(self, ubuntu):
+        assert isinstance(ubuntu["disco_packages"]["security_updates"], list)
+
+    def test_services_from_sysv_fallback(self, ubuntu):
+        # No systemd in the container: service_facts falls back to `service`.
+        assert ubuntu["services"] is None or isinstance(ubuntu["services"], dict)

@@ -1,0 +1,41 @@
+---
+# Running Containers (Windows)
+#
+# Only Docker (Mirantis/Moby) is checked; it is the runtime used on Windows Server.
+
+- name: List running docker containers
+  ansible.windows.win_command:
+    argv: [docker, ps, --no-trunc, --format, "{% raw %}{{json .}}{% endraw %}"]
+  register: disco_docker_ps
+  changed_when: false
+  failed_when: false
+  tags: [containers]
+
+- name: Publish container facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_containers: >-
+      {%- set result = [] -%}
+      {%- for line in disco_docker_ps.stdout_lines | default([]) if line | trim -%}
+        {%- set c = line | from_json -%}
+        {%- set _ = result.append({
+              'runtime': 'docker',
+              'id': c.ID | default(none),
+              'name': c.Names | default(none),
+              'image': c.Image | default(none),
+              'image_id': none,
+              'status': c.Status | default(none),
+              'ports': c.Ports | default(none) or none,
+            }) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: disco_docker_ps is disco_collected
+  tags: [containers]
+
+- name: Publish container facts as unavailable
+  # Docker is absent or not answering. A literal null: a templated none would render as "" on ansible-core < 2.19.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_containers: null
+  when: disco_docker_ps is not disco_collected
+  tags: [containers]

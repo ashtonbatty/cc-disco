@@ -1,0 +1,59 @@
+---
+# Satellite / Subscription
+#
+# Registration status and where packages come from. Katello/Satellite client
+# packages are derived from ansible_facts.packages (tag: packages). All probes
+# run in one task (see disco_probe_sh in vars/controls.yml).
+
+- name: Probe subscription status, rhsm server and non-Satellite repos
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    # Repo files with their own baseurl/mirrorlist/metalink that do not point at
+    # Satellite, a capsule or the Red Hat CDN.
+    non_satellite_repos() {
+      for f in /etc/yum.repos.d/*.repo; do
+        [ -f "$f" ] || continue
+        if grep -qE '^\s*(baseurl|mirrorlist|metalink)\s*=' "$f" 2>/dev/null; then
+          if ! grep -qiE 'satellite|capsule|katello|cdn\.redhat\.com' "$f" 2>/dev/null; then
+            echo "$f"
+            grep -E '^\s*(name|baseurl|mirrorlist|metalink)\s*=' "$f"
+            echo "---"
+          fi
+        fi
+      done
+    }
+    probe identity subscription-manager identity
+    probe status subscription-manager status
+    probe rhsm grep -E '^\s*(hostname|baseurl)\s*=' /etc/rhsm/rhsm.conf
+    [ -n "$DISCO_HEAVY" ] && probe non_satellite_repos non_satellite_repos
+    exit 0
+  args:
+    executable: /bin/bash
+  environment:
+    DISCO_HEAVY: "{{ 'yes' if collect_command_heavy_probes | bool else '' }}"
+  register: disco_satellite_probes
+  changed_when: false
+  failed_when: false
+  tags: [satellite]
+
+- name: Publish satellite facts
+  # subscription-manager status exits 1 when unregistered but still reports the
+  # status, so that field isn't gated on disco_collected.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_satellite: >-
+      {%- set p = disco_satellite_probes | disco_probes -%}
+      {%- set identity = p.identity.stdout | default('') | trim -%}
+      {%- set status = p.status.stdout | default('') | trim -%}
+      {%- set nonsat = p.non_satellite_repos.stdout | default('') | trim -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
+      {{ {
+           'subscription_identity': identity if p.identity is disco_collected and identity else none,
+           'subscription_status': status or none,
+           'rhsm_server': (p.rhsm.stdout_lines | map('trim') | list) if p.rhsm is disco_collected else none,
+           'katello_packages': (pkgs.keys() | select('search', '(?i)katello|satellite|gofer') | sort)
+             if pkgs | length > 0 else none,
+           'non_satellite_repos': nonsat if p.non_satellite_repos is disco_collected and nonsat else none,
+         } }}
+  tags: [satellite]

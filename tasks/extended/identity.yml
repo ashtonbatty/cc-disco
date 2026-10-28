@@ -1,0 +1,44 @@
+---
+# Identity / Domain Join
+#
+# All probes run in one task (see disco_probe_sh in vars/controls.yml).
+
+- name: Probe SSSD, realm, Kerberos and nsswitch configuration
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ disco_probe_sh }}
+    probe sssd cat /etc/sssd/sssd.conf
+    probe realm realm list
+    probe krb5 cat /etc/krb5.conf
+    if [ -e /etc/krb5.keytab ]; then emit keytab 0 true; else emit keytab 0 false; fi
+    probe nsswitch cat /etc/nsswitch.conf
+    exit 0
+  args:
+    executable: /bin/bash
+  register: disco_identity_probes
+  changed_when: false
+  failed_when: false
+  no_log: true
+  tags: [identity]
+
+- name: Publish identity facts
+  # sssd.conf can hold an LDAP bind password (ldap_default_authtok). Facts are more
+  # widely readable than the old 0600 report, so the value is redacted before publishing.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_identity: >-
+      {%- set p = disco_identity_probes | disco_probes -%}
+      {%- set sssd = p.sssd.stdout | default('') | trim
+           | regex_replace('(?m)^(\\s*ldap_default_authtok\\s*=).*$', '\\1 <redacted>') -%}
+      {%- set realm = p.realm.stdout | default('') | trim -%}
+      {%- set krb5 = p.krb5.stdout | default('') | trim -%}
+      {%- set nss = p.nsswitch.stdout | default('') | trim -%}
+      {{ {
+           'sssd_conf': sssd if p.sssd is disco_collected and sssd else none,
+           'realm_list': realm if p.realm is disco_collected and realm else none,
+           'krb5_conf': krb5 if p.krb5 is disco_collected and krb5 else none,
+           'krb5_keytab_exists': (p.keytab.stdout == 'true') if p.keytab is disco_collected else none,
+           'nsswitch_conf': nss if p.nsswitch is disco_collected and nss else none,
+         } }}
+  no_log: true
+  tags: [identity]

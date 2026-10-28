@@ -1,0 +1,75 @@
+---
+# Running Containers (every Linux host)
+#
+# Container images carry their own packages, which never show up in the host's
+# package list. Only root's containers are visible (the play runs with become);
+# rootless containers of other users are not listed.
+
+- name: List running podman containers
+  ansible.builtin.command: podman ps --format json
+  register: disco_podman_ps
+  changed_when: false
+  failed_when: false
+  tags: [containers]
+
+- name: List running docker containers
+  ansible.builtin.command:
+    argv: [docker, ps, --no-trunc, --format, "{% raw %}{{json .}}{% endraw %}"]
+  register: disco_docker_ps
+  changed_when: false
+  failed_when: false
+  tags: [containers]
+
+- name: Publish container facts
+  # podman-docker installs a docker shim, so containers are de-duplicated by ID.
+  # podman 1.x uses ID/Names-as-string; podman 2+ uses Id/Names-as-list.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_containers: >-
+      {%- set result = [] -%}
+      {%- set seen = [] -%}
+      {%- if disco_podman_ps is disco_collected -%}
+        {%- for c in (disco_podman_ps.stdout | default('') | trim or '[]') | from_json -%}
+          {%- set id = c.Id | default(c.ID | default('')) -%}
+          {%- set names = c.Names | default([]) -%}
+          {%- set _ = seen.append(id) -%}
+          {%- set _ = result.append({
+                'runtime': 'podman',
+                'id': id,
+                'name': (names if names is string else names | first | default(none)),
+                'image': c.Image | default(none),
+                'image_id': c.ImageID | default(none),
+                'status': c.Status | default(c.State | default(none)),
+                'ports': c.Ports | default(none),
+              }) -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {%- if disco_docker_ps is disco_collected -%}
+        {%- for line in disco_docker_ps.stdout_lines | default([]) if line | trim -%}
+          {%- set c = line | from_json -%}
+          {%- set id = c.ID | default(c.Id | default('')) -%}
+          {%- set names = c.Names | default([]) -%}
+          {%- if id not in seen -%}
+            {%- set _ = result.append({
+                  'runtime': 'docker',
+                  'id': id,
+                  'name': (names if names is string else names | first | default(none)),
+                  'image': c.Image | default(none),
+                  'image_id': none,
+                  'status': c.Status | default(none),
+                  'ports': c.Ports | default(none) or none,
+                }) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ result }}
+  when: disco_podman_ps is disco_collected or disco_docker_ps is disco_collected
+  tags: [containers]
+
+- name: Publish container facts as unavailable
+  # Neither runtime answered. A literal null: a templated none would render as "" on ansible-core < 2.19.
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_containers: null
+  when: disco_podman_ps is not disco_collected and disco_docker_ps is not disco_collected
+  tags: [containers]

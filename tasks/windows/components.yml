@@ -1,0 +1,48 @@
+---
+# Component Versions (Windows)
+#
+# setup reports the OS version without the UBR (update build revision), which is
+# the cumulative-update patch level. This reads it from the registry, along with
+# the .NET Framework 4.x release key. PowerShell is in ansible_powershell_version.
+
+- name: Read OS build, patch level and .NET release
+  ansible.windows.win_powershell:
+    script: |
+      $Ansible.Changed = $false
+      $cv = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+      $ndp = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue
+      [PSCustomObject]@{
+          product_name             = $cv.ProductName
+          edition_id               = $cv.EditionID
+          installation_type        = $cv.InstallationType
+          display_version          = $cv.DisplayVersion
+          release_id               = $cv.ReleaseId
+          current_build            = $cv.CurrentBuild
+          ubr                      = $cv.UBR
+          dotnet_framework_release = if ($ndp) { $ndp.Release } else { $null }
+      }
+  register: disco_win_components
+  changed_when: false
+  failed_when: false
+  tags: [components]
+
+- name: Publish component version facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_components: >-
+      {%- set c = (disco_win_components.output | first | default({}, true)) if disco_win_components is disco_collected else {} -%}
+      {{ {
+           'os': {
+             'product_name': c.product_name | default(none),
+             'edition_id': c.edition_id | default(none),
+             'installation_type': c.installation_type | default(none),
+             'display_version': c.display_version | default(none),
+             'release_id': c.release_id | default(none),
+             'current_build': c.current_build | default(none),
+             'ubr': c.ubr | default(none),
+             'build': (c.current_build ~ '.' ~ c.ubr)
+               if (c.current_build | default(none)) is not none and (c.ubr | default(none)) is not none else none,
+           } if c else none,
+           'dotnet_framework_release': c.dotnet_framework_release | default(none),
+         } }}
+  tags: [components]

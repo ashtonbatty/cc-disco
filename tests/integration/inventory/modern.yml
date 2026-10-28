@@ -1,0 +1,24 @@
+---
+# Hosts run by the ansible-core 2.16 controller.
+all:
+  children:
+    rhel7:
+      hosts:
+        el7-webserver: {}
+        el7-minimal: {}
+    rhel9:
+      hosts:
+        el9-extended: {}
+    rhel10:
+      hosts:
+        el10-extended: {}
+    ubuntu:
+      hosts:
+        ubuntu2404-inventory: {}
+  vars:
+    # Opt in to the extended layer; only the RHEL-family hosts take it.
+    disco_profile: extended
+    ansible_user: ansible
+    ansible_ssh_private_key_file: /home/ansible/.ssh/id_ecdsa
+    ansible_port: 22
+    ansible_python_interpreter: auto_silent

@@ -1,6 +1,16 @@
 ---
 services:
 
+  # --- RHEL-family targets (extended profile) ----------------------------------
+
+  el6-legacy:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-el6
+    hostname: el6-legacy
+    networks:
+      - disco-test
+
   el7-webserver:
     build:
       context: ../..
@@ -21,13 +31,41 @@ services:
     networks:
       - disco-test
 
-  el6-legacy:
+  el9-extended:
     build:
       context: ../..
-      dockerfile: tests/integration/Containerfile.target-el6
-    hostname: el6-legacy
+      dockerfile: tests/integration/Containerfile.target-alma
+      args:
+        ALMA_VERSION: "9"
+        SCENARIO: el9-extended
+    hostname: el9-extended
     networks:
       - disco-test
+
+  el10-extended:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-alma
+      args:
+        ALMA_VERSION: "10"
+        SCENARIO: el10-extended
+    hostname: el10-extended
+    networks:
+      - disco-test
+
+  # --- Inventory-profile target (extended requested, but not RHEL-family) ------
+
+  ubuntu2404-inventory:
+    build:
+      context: ../..
+      dockerfile: tests/integration/Containerfile.target-ubuntu
+      args:
+        SCENARIO: ubuntu2404-inventory
+    hostname: ubuntu2404-inventory
+    networks:
+      - disco-test
+
+  # --- Controller: ansible-core 2.11 (EL6) then 2.16 (everything else) --------
 
   controller:
     build:
@@ -35,9 +73,12 @@ services:
       dockerfile: tests/integration/Containerfile.controller
     hostname: controller
     depends_on:
+      - el6-legacy
       - el7-webserver
       - el7-minimal
-      - el6-legacy
+      - el9-extended
+      - el10-extended
+      - ubuntu2404-inventory
     volumes:
       - report-output:/home/ansible/playbook/output
     networks:

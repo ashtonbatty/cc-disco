@@ -1,0 +1,69 @@
+---
+# Discovery controls shared by the Linux and Windows plays.
+#
+# Values are lazily templated, so facts gathered by setup (ansible_distribution,
+# ansible_pkg_mgr, ...) are available when a task first reads them.
+
+discovery_mode: "{{ disco_mode | default('full') }}"
+
+# The extended layer is opt-in (-e disco_profile=extended) and only applies to
+# RHEL-family hosts (any version); every other host stays on the inventory
+# profile. The distribution list is explicit: Amazon Linux and Fedora report
+# os_family RedHat too.
+disco_extended_distributions: [RedHat, CentOS, OracleLinux, Rocky, AlmaLinux, Scientific]
+discovery_profile: >-
+  {{ 'extended'
+     if (disco_profile | default('inventory')) == 'extended'
+        and (ansible_facts.distribution | default('')) in disco_extended_distributions
+     else 'inventory' }}
+
+rhel_major: "{{ ansible_facts.distribution_major_version | default('0') }}"
+
+collect_deep_kernel: "{{ disco_collect_deep_kernel | default(discovery_mode != 'lightweight') | bool }}"
+collect_deep_filesystem: "{{ disco_collect_deep_filesystem | default(discovery_mode != 'lightweight') | bool }}"
+collect_deep_security: "{{ disco_collect_deep_security | default(discovery_mode != 'lightweight') | bool }}"
+collect_command_heavy_probes: "{{ disco_collect_command_heavy_probes | default(discovery_mode != 'lightweight') | bool }}"
+
+# --- Package manager helpers (Linux) -----------------------------------------
+
+disco_pkg_family: >-
+  {{ 'rpm' if ansible_facts.pkg_mgr | default('') in ['yum', 'dnf', 'dnf5', 'atomic_container']
+     else ('apt' if ansible_facts.pkg_mgr | default('') == 'apt' else 'other') }}
+
+# Every yum/dnf query runs cache-only (-C) and with the subscription-manager and
+# product-id plugins disabled, so it never refreshes metadata or rewrites redhat.repo.
+disco_yum: >-
+  {{ ('dnf' if ansible_facts.pkg_mgr | default('') in ['dnf', 'dnf5'] else 'yum')
+     ~ ' -C -q'
+     ~ ('' if ansible_facts.pkg_mgr | default('') == 'dnf5' else ' --disableplugin=subscription-manager,product-id') }}
+
+# rpm VENDOR substrings that identify the OS vendor's own packages. Anything else
+# (EPEL, ISV agents, locally built rpms) is reported as third-party.
+disco_os_vendor_patterns:
+  RedHat: Red Hat
+  CentOS: CentOS
+  Rocky: Rocky
+  AlmaLinux: AlmaLinux
+  OracleLinux: Oracle
+  Scientific: Scientific
+  Fedora: Fedora
+  Amazon: Amazon
+disco_os_vendor_pattern: "{{ disco_os_vendor_patterns[ansible_facts.distribution | default('')] | default(ansible_facts.distribution | default('')) }}"
+
+# apt package origins that belong to the OS vendor.
+disco_os_apt_origins: [Ubuntu, Debian]
+
+# --- Batched probes (extended layer) ----------------------------------------
+
+# Each extended section runs all its commands in one shell task: one round trip
+# per section instead of one per command. Every command prints one line,
+# name|rc|base64(output), which the disco_probes filter (filter_plugins/) turns
+# back into {name: {rc, stdout, stdout_lines}}.
+#   probe NAME CMD...         run CMD (stderr dropped) and record its rc and output
+#   probe_ls NAME DIR GLOB T  list DIR/GLOB entries passing `test T` (-f / -d),
+#                             symlinks excluded; a missing DIR is collected and empty
+#   emit NAME RC TEXT         record a value directly
+disco_probe_sh: |
+  emit() { printf '%s|%s|%s\n' "$1" "$2" "$(printf '%s' "$3" | base64 | tr -d '\n')"; }
+  probe() { local n=$1 o; shift; o=$("$@" 2>/dev/null); emit "$n" $? "$o"; }
+  probe_ls() { local f o; o=$(for f in "$2"/$3; do [ ! -L "$f" ] && [ "$4" "$f" ] && printf '%s\n' "$f"; done); emit "$1" 0 "$o"; }

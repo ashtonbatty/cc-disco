@@ -1,130 +1,185 @@
 ---
-# RHEL Server Discovery and Audit Playbook
+# Server Discovery — everything is published as Ansible facts
 #
-# Gathers comprehensive facts from RHEL 6/7/8 servers for migration planning
-# to RHEL 9/10. All tasks are read-only — nothing is modified on target hosts.
+# Every Linux and Windows host gets the inventory layer (installed packages,
+# services, running processes, listening ports, component versions, containers)
+# for vulnerability response. With -e disco_profile=extended, RHEL-family hosts
+# also get the extended layer: configuration for upgrade planning. All tasks
+# are read-only — nothing is modified on target hosts.
 #
 # Usage:
 #   ansible-playbook gather_facts.yml
 #   ansible-playbook gather_facts.yml --limit rhel8
-#   ansible-playbook gather_facts.yml --tags selinux,network
+#   ansible-playbook gather_facts.yml --tags packages,processes
 #   ansible-playbook gather_facts.yml -e disco_mode=lightweight
-#   ansible-playbook gather_facts.yml --tags deep_kernel
+#   ansible-playbook gather_facts.yml -e disco_profile=extended
 #
-# Output: ./output/discovery_report.yml
+# Output: cacheable facts (jsonfile fact cache / AAP fact storage) and
+#         ./output/facts/<inventory_hostname>.json
 
-- name: RHEL Server Discovery and Audit
+# Each run is a fresh snapshot: drop facts cached by earlier runs so sections
+# skipped this time (tags, knobs, profile changes) don't linger in the output.
+- name: Reset facts cached by earlier runs
   hosts: all
-  # Full fact gathering is intentional — tasks rely on ansible_facts.packages,
-  # ansible_facts.services, and hardware facts across multiple tag sections.
-  gather_facts: true
-  become: true
-
-  vars:
-    rhel_major: "{{ ansible_distribution_major_version }}"
-    discovery_mode: "{{ disco_mode | default('full') }}"
-    collect_deep_kernel: "{{ disco_collect_deep_kernel | default(discovery_mode != 'lightweight') | bool }}"
-    collect_deep_filesystem: "{{ disco_collect_deep_filesystem | default(discovery_mode != 'lightweight') | bool }}"
-    collect_deep_security: "{{ disco_collect_deep_security | default(discovery_mode != 'lightweight') | bool }}"
-    collect_command_heavy_probes: "{{ disco_collect_command_heavy_probes | default(discovery_mode != 'lightweight') | bool }}"
-
+  gather_facts: false
+  become: false
   tasks:
-
-    # Persist discovery controls into host facts so the report play can read
-    # them from hostvars (play-level vars are not automatically available there).
-    - name: Persist discovery controls as host facts
-      ansible.builtin.set_fact:
-        disco_discovery_mode: "{{ discovery_mode }}"
-        disco_collect_deep_kernel: "{{ collect_deep_kernel }}"
-        disco_collect_deep_filesystem: "{{ collect_deep_filesystem }}"
-        disco_collect_deep_security: "{{ collect_deep_security }}"
-        disco_collect_command_heavy_probes: "{{ collect_command_heavy_probes }}"
+    - name: Clear cached facts
+      ansible.builtin.meta: clear_facts
       tags: [always]
 
-    # Pre-requisite fact collection — tagged for all sections that depend on them
-    - name: Collect package facts for structured package analysis
-      ansible.builtin.package_facts:
-        manager: auto
-      failed_when: false
-      tags: [packages, readiness, apps]
+# ==============================================================================
+# Linux
+# ==============================================================================
 
-    - name: Collect service facts for structured service analysis
-      ansible.builtin.service_facts:
-      failed_when: false
-      tags: [services, network, firewall, readiness]
+- name: Linux discovery
+  hosts: "all:!windows"
+  # Hosts never read each other's data here, so each runs at its own pace and
+  # a slow host doesn't hold up the rest of the batch.
+  strategy: free
+  gather_facts: true
+  # facter/ohai are slow on Puppet/Chef-managed hosts and their facts aren't part
+  # of the discovery output.
+  gather_subset: [all, "!facter", "!ohai"]
+  become: true
+  vars_files:
+    - vars/controls.yml
 
-    - name: Import system tasks
-      ansible.builtin.import_tasks: tasks/system.yml
-    - name: Import SELinux tasks
-      ansible.builtin.import_tasks: tasks/selinux.yml
-    - name: Import identity tasks
-      ansible.builtin.import_tasks: tasks/identity.yml
-    - name: Import security tasks
-      ansible.builtin.import_tasks: tasks/security.yml
+  tasks:
+    - name: Import discovery controls
+      ansible.builtin.import_tasks: tasks/controls.yml
+
+    # --- Inventory layer: every Linux host ------------------------------------
+    - name: Import package tasks
+      ansible.builtin.import_tasks: tasks/linux/packages.yml
+    - name: Import service tasks
+      ansible.builtin.import_tasks: tasks/linux/services.yml
+    - name: Import process tasks
+      ansible.builtin.import_tasks: tasks/linux/processes.yml
+    - name: Import listening port tasks
+      ansible.builtin.import_tasks: tasks/linux/ports.yml
+    - name: Import component version tasks
+      ansible.builtin.import_tasks: tasks/linux/components.yml
+    - name: Import container tasks
+      ansible.builtin.import_tasks: tasks/linux/containers.yml
+
+# ==============================================================================
+# Extended (opt-in: -e disco_profile=extended; RHEL-family hosts only)
+# ==============================================================================
+
+- name: Extended discovery
+  hosts: "all:!windows"
+  strategy: free
+  gather_facts: false
+  become: true
+  vars_files:
+    - vars/controls.yml
+
+  tasks:
+    # The one gate for the whole layer: every other host leaves the play here.
+    - name: Skip hosts outside the extended profile
+      ansible.builtin.meta: end_host
+      when: discovery_profile | trim != 'extended'
+      tags: [always]
+
     - name: Import platform tasks
-      ansible.builtin.import_tasks: tasks/platform.yml
+      ansible.builtin.import_tasks: tasks/extended/platform.yml
     - name: Import kernel tasks
-      ansible.builtin.import_tasks: tasks/kernel.yml
+      ansible.builtin.import_tasks: tasks/extended/kernel.yml
     - name: Import network tasks
-      ansible.builtin.import_tasks: tasks/network.yml
+      ansible.builtin.import_tasks: tasks/extended/network.yml
     - name: Import firewall tasks
-      ansible.builtin.import_tasks: tasks/firewall.yml
-    - name: Import services tasks
-      ansible.builtin.import_tasks: tasks/services.yml
+      ansible.builtin.import_tasks: tasks/extended/firewall.yml
     - name: Import storage tasks
-      ansible.builtin.import_tasks: tasks/storage.yml
-    - name: Import packages tasks
-      ansible.builtin.import_tasks: tasks/packages.yml
-    - name: Import backup tasks
-      ansible.builtin.import_tasks: tasks/backup.yml
+      ansible.builtin.import_tasks: tasks/extended/storage.yml
+    - name: Import security tasks
+      ansible.builtin.import_tasks: tasks/extended/security.yml
+    - name: Import identity tasks
+      ansible.builtin.import_tasks: tasks/extended/identity.yml
     - name: Import satellite tasks
-      ansible.builtin.import_tasks: tasks/satellite.yml
+      ansible.builtin.import_tasks: tasks/extended/satellite.yml
+    - name: Import backup tasks
+      ansible.builtin.import_tasks: tasks/extended/backup.yml
     - name: Import filesystem tasks
-      ansible.builtin.import_tasks: tasks/filesystem.yml
+      ansible.builtin.import_tasks: tasks/extended/filesystem.yml
     - name: Import readiness tasks
-      ansible.builtin.import_tasks: tasks/readiness.yml
+      ansible.builtin.import_tasks: tasks/extended/readiness.yml
     - name: Import apps tasks
-      ansible.builtin.import_tasks: tasks/apps.yml
-
+      ansible.builtin.import_tasks: tasks/extended/apps.yml
 
 # ==============================================================================
-# Generate the combined YAML report
+# Windows
 # ==============================================================================
+# Windows task files are included dynamically, so a controller without the
+# ansible.windows collection (e.g. the ansible-core 2.11 controller needed for
+# RHEL 6) can still parse this playbook. Hosts must be in the `windows` group.
 
-- name: Generate discovery report
+- name: Windows discovery
+  hosts: windows
+  strategy: free
+  gather_facts: true
+  become: false
+  vars_files:
+    - vars/controls.yml
+
+  tasks:
+    - name: Import discovery controls
+      ansible.builtin.import_tasks: tasks/controls.yml
+
+    - name: Include Windows package tasks
+      ansible.builtin.include_tasks: tasks/windows/packages.yml
+      tags: [always]
+    - name: Include Windows service tasks
+      ansible.builtin.include_tasks: tasks/windows/services.yml
+      tags: [always]
+    - name: Include Windows process tasks
+      ansible.builtin.include_tasks: tasks/windows/processes.yml
+      tags: [always]
+    - name: Include Windows listening port tasks
+      ansible.builtin.include_tasks: tasks/windows/ports.yml
+      tags: [always]
+    - name: Include Windows component version tasks
+      ansible.builtin.include_tasks: tasks/windows/components.yml
+      tags: [always]
+    - name: Include Windows container tasks
+      ansible.builtin.include_tasks: tasks/windows/containers.yml
+      tags: [always]
+
+# ==============================================================================
+# Export
+# ==============================================================================
+# Facts are already in the fact cache (and AAP fact storage). This writes a
+# per-host JSON copy for CLI users. hosts: all + delegate_to keeps --limit working.
+
+- name: Export discovered facts
   hosts: all
   gather_facts: false
   become: false
 
   vars:
-    output_dir: "./output"
-    report_file: "{{ output_dir }}/discovery_report.yml"
+    disco_output_dir: "{{ playbook_dir }}/output/facts"
 
   tasks:
-
-    - name: Ensure output directory exists
+    - name: Ensure facts output directory exists
       run_once: true
       delegate_to: localhost
       ansible.builtin.file:
-        path: "{{ output_dir }}"
+        path: "{{ disco_output_dir }}"
         state: directory
         mode: "0700"
       tags: [always]
 
-    - name: Render consolidated discovery report
-      run_once: true
+    - name: Write per-host facts file
       delegate_to: localhost
-      ansible.builtin.template:
-        src: templates/report.yml.j2
-        dest: "{{ report_file }}"
+      ansible.builtin.copy:
+        content: "{{ hostvars[inventory_hostname].ansible_facts | to_nice_json(sort_keys=true) }}\n"
+        dest: "{{ disco_output_dir }}/{{ inventory_hostname }}.json"
         mode: "0600"
-      vars:
-        report_hosts: "{{ ansible_play_hosts_all | difference(['localhost']) }}"
       tags: [always]
 
-    - name: Report location
+    - name: Report output location
       run_once: true
       delegate_to: localhost
       ansible.builtin.debug:
-        msg: "Discovery report written to {{ report_file }}"
+        msg: "Discovery facts written to {{ disco_output_dir }}/<host>.json"
       tags: [always]

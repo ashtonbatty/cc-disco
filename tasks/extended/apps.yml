@@ -1,0 +1,20 @@
+---
+# Common Application Detection (derived from ansible_facts.packages, tag: packages)
+
+- name: Publish common server application facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    disco_apps: >-
+      {%- set result = [] -%}
+      {%- set known_apps = ['httpd', 'nginx', 'mysql-server', 'mariadb-server', 'postgresql-server', 'tomcat', 'docker', 'podman'] -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
+      {%- for app in known_apps -%}
+        {%- if app in pkgs -%}{%- set _ = result.append(app) -%}{%- endif -%}
+      {%- endfor -%}
+      {%- for name in pkgs | sort -%}
+        {%- if name is match('^java-.*-openjdk$|^oracle-database-preinstall.*$') and name not in result -%}
+          {%- set _ = result.append(name) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ {'common': result if pkgs | length > 0 else none} }}
+  tags: [apps]

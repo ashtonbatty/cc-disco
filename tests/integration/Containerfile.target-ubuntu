@@ -1,0 +1,20 @@
+FROM docker.io/library/ubuntu:24.04
+
+ARG SCENARIO=ubuntu2404-inventory
+ENV DEBIAN_FRONTEND=noninteractive
+
+# sshd, sudo, python3-apt (needed by package_facts) and the tools the
+# inventory layer probes (ps, ss). apt lists are kept: `apt list --upgradable`
+# reads them.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssh-server sudo python3 python3-apt procps iproute2
+
+# User, sudo, sshd and the controller's key (shared by every target).
+COPY tests/integration/target-setup.sh tests/integration/ssh-keys/id_ecdsa.pub /tmp/
+RUN bash /tmp/target-setup.sh /tmp/id_ecdsa.pub
+
+# Provision script (scenario-specific config)
+COPY tests/integration/scenarios/${SCENARIO}/provision.sh /tmp/provision.sh
+RUN chmod +x /tmp/provision.sh && /tmp/provision.sh
+
+CMD ["/usr/sbin/sshd", "-D"]
