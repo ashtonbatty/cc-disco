@@ -9,3 +9,12 @@
   ansible.builtin.service_facts:
   failed_when: false
   tags: [services, firewall]
+
+- name: Publish services as unavailable
+  # service_facts sets no fact when it finds no service manager (e.g. containers
+  # without systemd). A literal null keeps the null convention.
+  ansible.builtin.set_fact:
+    cacheable: true
+    services: null
+  when: ansible_facts.services is not defined
+  tags: [services, firewall]

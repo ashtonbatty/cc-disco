@@ -11,8 +11,8 @@
   changed_when: false
   failed_when: false
   when: >-
-    (ansible_facts.services | default({})).get('firewalld.service',
-      (ansible_facts.services | default({})).get('firewalld', {})).state | default('') == 'running'
+    (ansible_facts.services | default({}, true)).get('firewalld.service',
+      (ansible_facts.services | default({}, true)).get('firewalld', {})).state | default('') == 'running'
   tags: [firewall]
 
 - name: Get iptables rules

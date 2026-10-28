@@ -68,7 +68,7 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_readiness: >-
-      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {%- set have_pkgs = pkgs | length > 0 -%}
       {%- set pkg32 = [] -%}
       {%- set java = [] -%}

@@ -164,6 +164,7 @@ PS_OUTPUT = "\n".join([
     "      2       0 root                             [kthreadd]",
     "     15       2 root                             [ksoftirqd/0]",
     "    812       1 root                             /usr/sbin/sshd -D",
+    "    813       1 root                             sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups",
     "   1044       1 nginx                            nginx: worker process",
     "   2201       1 postgres-backup                  /usr/pgsql-15/bin/postgres -D /var/lib/pgsql/15/data",
 ])
@@ -172,10 +173,12 @@ PS_OUTPUT = "\n".join([
 def test_processes():
     facts = publish("tasks/linux/processes.yml", {"disco_ps": cmd(PS_OUTPUT)})
     procs = facts["disco_processes"]
-    assert [p["pid"] for p in procs] == [1, 812, 1044, 2201]
+    assert [p["pid"] for p in procs] == [1, 812, 813, 1044, 2201]
     assert procs[1] == {"pid": 812, "ppid": 1, "user": "root", "name": "sshd", "command": "/usr/sbin/sshd -D"}
-    assert procs[2]["name"] == "nginx:"
-    assert procs[3]["user"] == "postgres-backup"
+    # setproctitle names ("sshd: ...", "nginx: worker process") lose the colon.
+    assert procs[2]["name"] == "sshd"
+    assert procs[3]["name"] == "nginx"
+    assert procs[4]["user"] == "postgres-backup"
 
 
 def test_processes_unavailable_is_null():
@@ -591,3 +594,25 @@ def test_windows_containers():
         "image_id": None, "status": "Up 3 hours", "ports": None,
     }]
     assert publish("tasks/windows/containers.yml", {"disco_docker_ps": missing_cmd()}) == {"disco_containers": None}
+
+
+def test_package_derived_facts_tolerate_null_packages(rhel8_facts):
+    """package_facts can fail (published as packages: null); derived facts become null, not errors."""
+    facts = dict(rhel8_facts, packages=None)
+    f = _migration(facts, FULL_MIGRATION)
+    assert f["disco_apps"]["common"] is None
+    assert f["disco_satellite"]["katello_packages"] is None
+    assert f["disco_readiness"]["deprecated_packages"] is None
+    pk = publish("tasks/linux/packages.yml", _ctx(
+        dict(facts, pkg_mgr="apt"),
+        disco_rpm_vendors=skipped(), disco_last_kernel_update=skipped(), disco_repos_enabled=skipped(),
+        disco_versionlocks=skipped(), disco_security_updates_rpm=skipped(), disco_apt_sources=cmd(""),
+        disco_apt_holds=cmd(""), disco_security_updates_apt=cmd("Listing..."), disco_snaps=missing_cmd(),
+    ))
+    assert pk["disco_packages"]["third_party"] is None
+    assert "packages" not in pk  # the null fallback only fires when the fact is undefined
+
+
+def test_services_and_packages_fallbacks_publish_null():
+    assert publish("tasks/linux/services.yml", {"ansible_facts": {}}) == {"services": None}
+    assert publish("tasks/linux/services.yml", {"ansible_facts": {"services": {}}}) == {}

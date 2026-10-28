@@ -18,7 +18,8 @@
     for mod in $(lsmod | awk 'NR>1{print $1}'); do
       info=$(modinfo "$mod" 2>/dev/null)
       filename=$(echo "$info" | grep -i '^filename:' | head -1 | awk '{print $2}')
-      if echo "$filename" | grep -qv '/kernel/'; then
+      # No filename means modinfo can't place the module, so it can't be classified.
+      if [ -n "$filename" ] && echo "$filename" | grep -qv '/kernel/'; then
         author=$(echo "$info" | grep -i '^author:' | head -1 | sed 's/^author: *//')
         echo "${mod}|${filename}|${author}"
       fi
@@ -73,7 +74,7 @@
         {%- set f = line.split('|') -%}
         {%- set _ = third_party.append({
               'module': f[0],
-              'filename': f[1] | default(none),
+              'filename': (f[1] | default('')) or none,
               'author': (f[2] | default('')) or none,
             }) -%}
       {%- endfor -%}

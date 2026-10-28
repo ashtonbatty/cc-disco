@@ -55,7 +55,7 @@
       {%- set identity = disco_sub_identity.stdout | default('') | trim -%}
       {%- set status = disco_sub_status.stdout | default('') | trim -%}
       {%- set nonsat = disco_non_satellite_repos.stdout | default('') | trim -%}
-      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {{ {
            'subscription_identity': identity if (disco_sub_identity.rc | default(1)) == 0 and identity else none,
            'subscription_status': status or none,

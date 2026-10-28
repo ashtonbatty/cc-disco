@@ -15,6 +15,7 @@
 
 - name: Publish process facts
   # Kernel threads (pid 2 and its children) are dropped: they carry no package or version.
+  # name drops the trailing colon that setproctitle adds ("sshd: /usr/sbin/sshd -D [listener]").
   ansible.builtin.set_fact:
     cacheable: true
     disco_processes: >-
@@ -26,7 +27,7 @@
                 'pid': f[0] | int,
                 'ppid': f[1] | int,
                 'user': f[2],
-                'name': f[3].split() | first | basename,
+                'name': f[3].split() | first | basename | regex_replace(':$', ''),
                 'command': f[3],
               }) -%}
         {%- endif -%}

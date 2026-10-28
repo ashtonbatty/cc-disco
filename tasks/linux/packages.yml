@@ -11,6 +11,15 @@
   failed_when: false
   tags: [packages, readiness, apps, satellite]
 
+- name: Publish packages as unavailable
+  # package_facts sets no fact when no supported manager answers (e.g. apt without
+  # python3-apt). A literal null keeps the null convention.
+  ansible.builtin.set_fact:
+    cacheable: true
+    packages: null
+  when: ansible_facts.packages is not defined
+  tags: [packages, readiness, apps, satellite]
+
 - name: List rpm packages with their vendor
   # package_facts does not return the rpm VENDOR tag.
   ansible.builtin.command: rpm -qa --qf "%{NAME}|%{VERSION}-%{RELEASE}.%{ARCH}|%{VENDOR}\n"  # noqa command-instead-of-module
@@ -108,7 +117,7 @@
   ansible.builtin.set_fact:
     cacheable: true
     disco_packages: >-
-      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {%- set third_party = [] -%}
       {%- if disco_pkg_family == 'rpm' -%}
         {%- for line in disco_rpm_vendors.stdout_lines | default([]) -%}

@@ -7,7 +7,7 @@
     disco_apps: >-
       {%- set result = [] -%}
       {%- set known_apps = ['httpd', 'nginx', 'mysql-server', 'mariadb-server', 'postgresql-server', 'tomcat', 'docker', 'podman'] -%}
-      {%- set pkgs = ansible_facts.packages | default({}) -%}
+      {%- set pkgs = ansible_facts.packages | default({}, true) -%}
       {%- for app in known_apps -%}
         {%- if app in pkgs -%}{%- set _ = result.append(app) -%}{%- endif -%}
       {%- endfor -%}
